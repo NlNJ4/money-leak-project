@@ -5,10 +5,16 @@ import {
 } from "@/lib/expense-service";
 import { connection } from "next/server";
 
-export default async function Home() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ lineUserId?: string }>;
+}) {
   await connection();
 
-  const summary = getDashboardSummary(DEMO_LINE_USER_ID);
+  const params = await searchParams;
+  const lineUserId = params.lineUserId ?? DEMO_LINE_USER_ID;
+  const summary = getDashboardSummary(lineUserId);
 
   return <DashboardView summary={summary} />;
 }
