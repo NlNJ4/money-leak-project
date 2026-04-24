@@ -1,6 +1,6 @@
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import {
-  DEMO_LINE_USER_ID,
+  getDefaultLineUserId,
   getDashboardSummary,
 } from "@/lib/expense-service";
 import { connection } from "next/server";
@@ -13,7 +13,7 @@ export default async function DashboardPage({
   await connection();
 
   const params = await searchParams;
-  const lineUserId = params.lineUserId ?? DEMO_LINE_USER_ID;
+  const lineUserId = params.lineUserId ?? getDefaultLineUserId();
   const summary = await getDashboardSummary(lineUserId);
 
   return <DashboardView summary={summary} />;

@@ -37,6 +37,10 @@ const globalForMoneyLeak = globalThis as typeof globalThis & {
   __moneyLeakStore?: MoneyLeakStore;
 };
 
+export function getDefaultLineUserId() {
+  return process.env.DEFAULT_LINE_USER_ID?.trim() || DEMO_LINE_USER_ID;
+}
+
 function shiftDateKey(todayKey: string, dayOffset: number) {
   return new Date(
     Date.UTC(

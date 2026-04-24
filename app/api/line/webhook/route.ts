@@ -57,6 +57,19 @@ async function buildMonthlySummaryReply(lineUserId: string) {
 async function handleLineText(lineUserId: string, text: string) {
   const normalized = text.trim().toLowerCase();
 
+  if (
+    ["id", "my id", "line id", "user id", "whoami", "me"].includes(normalized)
+  ) {
+    const dashboardUrl = getDashboardUrl(lineUserId);
+
+    return [
+      `LINE user id: ${lineUserId}`,
+      dashboardUrl ? `Dashboard: ${dashboardUrl}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
   if (["สรุปวันนี้", "today", "summary today"].includes(normalized)) {
     return buildDailySummaryReply(lineUserId);
   }
