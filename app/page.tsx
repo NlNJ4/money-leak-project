@@ -8,7 +8,7 @@ import { connection } from "next/server";
 export default async function Home() {
   await connection();
 
-  const summary = getDashboardSummary(DEMO_LINE_USER_ID);
+  const summary = await getDashboardSummary(DEMO_LINE_USER_ID);
 
   return <DashboardView summary={summary} />;
 }

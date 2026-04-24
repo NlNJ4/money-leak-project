@@ -14,7 +14,7 @@ export default async function DashboardPage({
 
   const params = await searchParams;
   const lineUserId = params.lineUserId ?? DEMO_LINE_USER_ID;
-  const summary = getDashboardSummary(lineUserId);
+  const summary = await getDashboardSummary(lineUserId);
 
   return <DashboardView summary={summary} />;
 }

@@ -21,13 +21,13 @@ function isExpenseCategory(value: unknown): value is ExpenseCategory {
   );
 }
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const lineUserId =
     request.nextUrl.searchParams.get("lineUserId") ?? DEMO_LINE_USER_ID;
 
   return NextResponse.json({
     dataMode: lineUserId === DEMO_LINE_USER_ID ? "demo" : "user",
-    expenses: listExpenses(lineUserId),
+    expenses: await listExpenses(lineUserId),
   });
 }
 
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const expense = createExpense({ lineUserId, ...parsed });
+      const expense = await createExpense({ lineUserId, ...parsed });
 
       return NextResponse.json({ expense }, { status: 201 });
     }
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     const category = isExpenseCategory(body.category)
       ? body.category
       : detectCategory(title);
-    const expense = createExpense({
+    const expense = await createExpense({
       lineUserId,
       title,
       amountBaht,

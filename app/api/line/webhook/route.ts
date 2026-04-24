@@ -30,8 +30,8 @@ function getDashboardUrl(lineUserId: string) {
   return url.toString();
 }
 
-function buildDailySummaryReply(lineUserId: string) {
-  const summary = getDashboardSummary(lineUserId);
+async function buildDailySummaryReply(lineUserId: string) {
+  const summary = await getDashboardSummary(lineUserId);
 
   return [
     `วันนี้ใช้ไป ${formatBaht(summary.todayTotalBaht)} จากงบ ${formatBaht(summary.dailyBudgetBaht)}`,
@@ -41,8 +41,8 @@ function buildDailySummaryReply(lineUserId: string) {
   ].join("\n");
 }
 
-function buildMonthlySummaryReply(lineUserId: string) {
-  const summary = getDashboardSummary(lineUserId);
+async function buildMonthlySummaryReply(lineUserId: string) {
+  const summary = await getDashboardSummary(lineUserId);
   const topLeak = summary.leakInsights[0];
 
   return [
@@ -54,7 +54,7 @@ function buildMonthlySummaryReply(lineUserId: string) {
   ].join("\n");
 }
 
-function handleLineText(lineUserId: string, text: string) {
+async function handleLineText(lineUserId: string, text: string) {
   const normalized = text.trim().toLowerCase();
 
   if (["สรุปวันนี้", "today", "summary today"].includes(normalized)) {
@@ -76,7 +76,7 @@ function handleLineText(lineUserId: string, text: string) {
   const budgetCommand = parseDailyBudgetCommand(text);
 
   if (budgetCommand) {
-    updateDailyBudget(lineUserId, budgetCommand.dailyBudgetBaht);
+    await updateDailyBudget(lineUserId, budgetCommand.dailyBudgetBaht);
 
     return `ตั้งงบรายวันแล้ว: ${formatBaht(budgetCommand.dailyBudgetBaht)}`;
   }
@@ -87,11 +87,11 @@ function handleLineText(lineUserId: string, text: string) {
     return "พิมพ์รายการกับจำนวนเงิน เช่น ข้าว 55 หรือพิมพ์ สรุปวันนี้";
   }
 
-  createExpense({ lineUserId, ...parsed });
+  await createExpense({ lineUserId, ...parsed });
 
   return [
     `บันทึกแล้ว: ${parsed.title} ${formatBaht(parsed.amountBaht)}`,
-    buildDailySummaryReply(lineUserId),
+    await buildDailySummaryReply(lineUserId),
   ].join("\n");
 }
 
@@ -118,7 +118,7 @@ async function handleLineEvent(event: LineWebhookEvent) {
     return;
   }
 
-  await replyText(event.replyToken, handleLineText(lineUserId, text));
+  await replyText(event.replyToken, await handleLineText(lineUserId, text));
 }
 
 export async function POST(request: Request) {

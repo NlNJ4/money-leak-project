@@ -37,6 +37,7 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       expenses: {
         Row: {
@@ -69,6 +70,15 @@ export type Database = {
           spent_at?: string;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "expenses_line_user_id_fkey";
+            columns: ["line_user_id"];
+            isOneToOne: false;
+            referencedRelation: "line_users";
+            referencedColumns: ["line_user_id"];
+          },
+        ];
       };
     };
     Views: Record<string, never>;

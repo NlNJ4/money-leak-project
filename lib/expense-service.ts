@@ -1,12 +1,18 @@
 import { buildDashboardSummary } from "@/lib/analyze";
+import { categoryOrder } from "@/lib/categories";
 import { getBangkokDateKey, toBangkokIso } from "@/lib/date";
 import { detectCategory } from "@/lib/parser";
+import {
+  getSupabaseAdminClient,
+  isSupabaseConfigured,
+} from "@/lib/supabase/admin";
 import type {
   DashboardSummary,
   Expense,
   ExpenseCategory,
   UserBudget,
 } from "@/lib/types";
+import type { Database } from "@/types/database.types";
 
 export const DEMO_LINE_USER_ID = "demo-line-user";
 
@@ -24,6 +30,9 @@ type MoneyLeakStore = {
   budgets: Map<string, UserBudget>;
 };
 
+type ExpenseRow = Database["public"]["Tables"]["expenses"]["Row"];
+type LineUserRow = Database["public"]["Tables"]["line_users"]["Row"];
+
 const globalForMoneyLeak = globalThis as typeof globalThis & {
   __moneyLeakStore?: MoneyLeakStore;
 };
@@ -38,6 +47,12 @@ function shiftDateKey(todayKey: string, dayOffset: number) {
   )
     .toISOString()
     .slice(0, 10);
+}
+
+function toExpenseCategory(category: string): ExpenseCategory {
+  return categoryOrder.includes(category as ExpenseCategory)
+    ? (category as ExpenseCategory)
+    : "other";
 }
 
 function createDemoExpenses(now = new Date()): Expense[] {
@@ -100,7 +115,28 @@ function getStore() {
   return globalForMoneyLeak.__moneyLeakStore;
 }
 
-export function getBudget(lineUserId = DEMO_LINE_USER_ID): UserBudget {
+function mapExpense(row: ExpenseRow): Expense {
+  return {
+    id: row.id,
+    lineUserId: row.line_user_id,
+    title: row.title,
+    amountBaht: row.amount_baht,
+    category: toExpenseCategory(row.category),
+    isNeed: row.is_need,
+    spentAt: row.spent_at,
+    createdAt: row.created_at,
+  };
+}
+
+function mapBudget(row: LineUserRow): UserBudget {
+  return {
+    lineUserId: row.line_user_id,
+    dailyBudgetBaht: row.daily_budget_baht,
+    monthlyBudgetBaht: row.monthly_budget_baht,
+  };
+}
+
+function getMemoryBudget(lineUserId = DEMO_LINE_USER_ID): UserBudget {
   const store = getStore();
   const existingBudget = store.budgets.get(lineUserId);
 
@@ -117,9 +153,9 @@ export function getBudget(lineUserId = DEMO_LINE_USER_ID): UserBudget {
   return budget;
 }
 
-export function updateDailyBudget(lineUserId: string, dailyBudgetBaht: number) {
+function updateMemoryDailyBudget(lineUserId: string, dailyBudgetBaht: number) {
   const store = getStore();
-  const currentBudget = getBudget(lineUserId);
+  const currentBudget = getMemoryBudget(lineUserId);
   const nextBudget = {
     ...currentBudget,
     dailyBudgetBaht,
@@ -130,7 +166,7 @@ export function updateDailyBudget(lineUserId: string, dailyBudgetBaht: number) {
   return nextBudget;
 }
 
-export function listExpenses(lineUserId = DEMO_LINE_USER_ID) {
+function listMemoryExpenses(lineUserId = DEMO_LINE_USER_ID) {
   return getStore()
     .expenses.filter((expense) => expense.lineUserId === lineUserId)
     .sort(
@@ -138,23 +174,13 @@ export function listExpenses(lineUserId = DEMO_LINE_USER_ID) {
     );
 }
 
-export function createExpense(input: ExpenseInput) {
-  const title = input.title.trim();
-
-  if (!title) {
-    throw new Error("Expense title is required");
-  }
-
-  if (!Number.isInteger(input.amountBaht) || input.amountBaht <= 0) {
-    throw new Error("Expense amount must be a positive integer baht amount");
-  }
-
+function createMemoryExpense(input: ExpenseInput) {
   const expense: Expense = {
     id: crypto.randomUUID(),
     lineUserId: input.lineUserId,
-    title,
+    title: input.title.trim(),
     amountBaht: input.amountBaht,
-    category: input.category ?? detectCategory(title),
+    category: input.category ?? detectCategory(input.title),
     isNeed: input.isNeed ?? false,
     spentAt: input.spentAt ?? new Date().toISOString(),
     createdAt: new Date().toISOString(),
@@ -165,16 +191,185 @@ export function createExpense(input: ExpenseInput) {
   return expense;
 }
 
-export function getDashboardSummary(
+function validateExpenseInput(input: ExpenseInput) {
+  if (!input.lineUserId.trim()) {
+    throw new Error("Line user id is required");
+  }
+
+  if (!input.title.trim()) {
+    throw new Error("Expense title is required");
+  }
+
+  if (!Number.isInteger(input.amountBaht) || input.amountBaht <= 0) {
+    throw new Error("Expense amount must be a positive integer baht amount");
+  }
+}
+
+async function ensureLineUser(lineUserId: string) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) return getMemoryBudget(lineUserId);
+
+  const { data: existingUser, error: selectError } = await supabase
+    .from("line_users")
+    .select("*")
+    .eq("line_user_id", lineUserId)
+    .maybeSingle();
+
+  if (selectError) {
+    console.error("Supabase line_users select failed", {
+      code: selectError.code,
+      message: selectError.message,
+    });
+    throw new Error("Unable to load user budget");
+  }
+
+  if (existingUser) return mapBudget(existingUser);
+
+  const { data: insertedUser, error: insertError } = await supabase
+    .from("line_users")
+    .upsert(
+      { line_user_id: lineUserId },
+      { onConflict: "line_user_id", ignoreDuplicates: false },
+    )
+    .select("*")
+    .single();
+
+  if (insertError || !insertedUser) {
+    console.error("Supabase line_users upsert failed", {
+      code: insertError?.code,
+      message: insertError?.message,
+    });
+    throw new Error("Unable to create LINE user");
+  }
+
+  return mapBudget(insertedUser);
+}
+
+function shouldUseMemory(lineUserId: string) {
+  return lineUserId === DEMO_LINE_USER_ID || !isSupabaseConfigured();
+}
+
+export async function getBudget(lineUserId = DEMO_LINE_USER_ID) {
+  if (shouldUseMemory(lineUserId)) return getMemoryBudget(lineUserId);
+
+  return ensureLineUser(lineUserId);
+}
+
+export async function updateDailyBudget(
+  lineUserId: string,
+  dailyBudgetBaht: number,
+) {
+  if (!Number.isInteger(dailyBudgetBaht) || dailyBudgetBaht <= 0) {
+    throw new Error("Daily budget must be a positive integer baht amount");
+  }
+
+  if (shouldUseMemory(lineUserId)) {
+    return updateMemoryDailyBudget(lineUserId, dailyBudgetBaht);
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return updateMemoryDailyBudget(lineUserId, dailyBudgetBaht);
+
+  await ensureLineUser(lineUserId);
+
+  const { data, error } = await supabase
+    .from("line_users")
+    .update({
+      daily_budget_baht: dailyBudgetBaht,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("line_user_id", lineUserId)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    console.error("Supabase line_users update failed", {
+      code: error?.code,
+      message: error?.message,
+    });
+    throw new Error("Unable to update daily budget");
+  }
+
+  return mapBudget(data);
+}
+
+export async function listExpenses(lineUserId = DEMO_LINE_USER_ID) {
+  if (shouldUseMemory(lineUserId)) return listMemoryExpenses(lineUserId);
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return listMemoryExpenses(lineUserId);
+
+  const { data, error } = await supabase
+    .from("expenses")
+    .select("*")
+    .eq("line_user_id", lineUserId)
+    .order("spent_at", { ascending: false });
+
+  if (error) {
+    console.error("Supabase expenses select failed", {
+      code: error.code,
+      message: error.message,
+    });
+    throw new Error("Unable to load expenses");
+  }
+
+  return data.map(mapExpense);
+}
+
+export async function createExpense(input: ExpenseInput) {
+  validateExpenseInput(input);
+
+  const normalizedInput = {
+    ...input,
+    title: input.title.trim(),
+    category: input.category ?? detectCategory(input.title),
+  };
+
+  if (shouldUseMemory(input.lineUserId)) {
+    return createMemoryExpense(normalizedInput);
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return createMemoryExpense(normalizedInput);
+
+  await ensureLineUser(input.lineUserId);
+
+  const { data, error } = await supabase
+    .from("expenses")
+    .insert({
+      line_user_id: input.lineUserId,
+      title: normalizedInput.title,
+      amount_baht: input.amountBaht,
+      category: normalizedInput.category,
+      is_need: input.isNeed ?? false,
+      spent_at: input.spentAt ?? new Date().toISOString(),
+    })
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    console.error("Supabase expenses insert failed", {
+      code: error?.code,
+      message: error?.message,
+    });
+    throw new Error("Unable to create expense");
+  }
+
+  return mapExpense(data);
+}
+
+export async function getDashboardSummary(
   lineUserId = DEMO_LINE_USER_ID,
   now = new Date(),
-): DashboardSummary {
-  const isDemo = lineUserId === DEMO_LINE_USER_ID;
+): Promise<DashboardSummary> {
+  const budget = await getBudget(lineUserId);
+  const expenses = await listExpenses(lineUserId);
 
   return buildDashboardSummary({
-    expenses: listExpenses(lineUserId),
-    budget: getBudget(lineUserId),
-    dataMode: isDemo ? "demo" : "user",
+    expenses,
+    budget,
+    dataMode: shouldUseMemory(lineUserId) ? "demo" : "user",
     now,
   });
 }
