@@ -5,12 +5,20 @@ import {
 } from "@/lib/expense-service";
 import { formatBaht } from "@/lib/format";
 import {
+  type GeminiLineIntent,
+  parseLineIntentWithGemini,
+} from "@/lib/gemini-expense-parser";
+import {
   type LineWebhookEvent,
   type LineWebhookPayload,
   replyLineMessage,
   verifyLineSignature,
 } from "@/lib/line";
-import { parseDailyBudgetCommand, parseExpenseText } from "@/lib/parser";
+import {
+  type ParsedExpenseText,
+  parseDailyBudgetCommand,
+  parseExpenseText,
+} from "@/lib/parser";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -54,6 +62,72 @@ async function buildMonthlySummaryReply(lineUserId: string) {
   ].join("\n");
 }
 
+async function buildSavedExpenseReply(
+  lineUserId: string,
+  expense: ParsedExpenseText & { isNeed?: boolean },
+) {
+  await createExpense({
+    lineUserId,
+    title: expense.title,
+    amountBaht: expense.amountBaht,
+    category: expense.category,
+    isNeed: expense.isNeed,
+  });
+
+  return [
+    `บันทึกแล้ว: ${expense.title} ${formatBaht(expense.amountBaht)}`,
+    await buildDailySummaryReply(lineUserId),
+  ].join("\n");
+}
+
+async function handleGeminiIntent(
+  lineUserId: string,
+  intent: GeminiLineIntent | null,
+) {
+  if (!intent) return null;
+
+  switch (intent.action) {
+    case "expense":
+      return buildSavedExpenseReply(lineUserId, intent);
+
+    case "budget":
+      await updateDailyBudget(lineUserId, intent.dailyBudgetBaht);
+
+      return `ตั้งงบรายวันแล้ว: ${formatBaht(intent.dailyBudgetBaht)}`;
+
+    case "summary_today":
+      return buildDailySummaryReply(lineUserId);
+
+    case "summary_month":
+      return buildMonthlySummaryReply(lineUserId);
+
+    case "dashboard": {
+      const dashboardUrl = getDashboardUrl(lineUserId);
+
+      return dashboardUrl
+        ? `Dashboard ของคุณ: ${dashboardUrl}`
+        : "ยังไม่ได้ตั้งค่า NEXT_PUBLIC_APP_URL สำหรับลิงก์ Dashboard";
+    }
+
+    case "identity": {
+      const dashboardUrl = getDashboardUrl(lineUserId);
+
+      return [
+        `LINE user id: ${lineUserId}`,
+        dashboardUrl ? `Dashboard: ${dashboardUrl}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    case "clarify":
+      return intent.clarificationQuestion;
+
+    case "unknown":
+      return intent.clarificationQuestion;
+  }
+}
+
 async function handleLineText(lineUserId: string, text: string) {
   const normalized = text.trim().toLowerCase();
 
@@ -94,18 +168,20 @@ async function handleLineText(lineUserId: string, text: string) {
     return `ตั้งงบรายวันแล้ว: ${formatBaht(budgetCommand.dailyBudgetBaht)}`;
   }
 
+  const geminiReply = await handleGeminiIntent(
+    lineUserId,
+    await parseLineIntentWithGemini(text),
+  );
+
+  if (geminiReply) return geminiReply;
+
   const parsed = parseExpenseText(text);
 
   if (!parsed) {
     return "พิมพ์รายการกับจำนวนเงิน เช่น ข้าว 55 หรือพิมพ์ สรุปวันนี้";
   }
 
-  await createExpense({ lineUserId, ...parsed });
-
-  return [
-    `บันทึกแล้ว: ${parsed.title} ${formatBaht(parsed.amountBaht)}`,
-    await buildDailySummaryReply(lineUserId),
-  ].join("\n");
+  return buildSavedExpenseReply(lineUserId, parsed);
 }
 
 async function replyText(replyToken: string, text: string) {
