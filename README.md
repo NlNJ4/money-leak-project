@@ -69,6 +69,7 @@ Supported LINE commands:
 - `สรุปสัปดาห์นี้` or `week` returns the latest 7-day summary.
 - `สรุปเดือนนี้` or `month` returns this month's summary.
 - `รายจ่ายซ้ำ` or `subs` returns recurring subscription-like expenses.
+- `เตือนจ่ายซ้ำ` or `reminders` returns recurring payments due in the next 7 days.
 - `ตั้งงบ 200` sets the daily budget.
 - `ตั้งงบเดือน 6000` sets the monthly budget.
 - `dashboard` returns a private dashboard link.
@@ -110,5 +111,7 @@ taskkill /PID <PID> /F
 - Edit or delete recent expenses from the dashboard.
 - Review the latest 7-day total, daily average, and top spending category.
 - Detect recurring subscription-like spending from the latest 90 days.
+- Show upcoming recurring payment reminders and include the nearest one in daily LINE summaries.
+- Export up to 1,000 scoped expenses as CSV from the dashboard.
 - Update daily and monthly budgets from the budget section.
 - Dashboard mutations call scoped API routes and refresh server-rendered summaries after saving.

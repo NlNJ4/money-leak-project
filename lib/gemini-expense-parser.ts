@@ -17,6 +17,7 @@ const intentActions = [
   "summary_week",
   "summary_month",
   "subscription_summary",
+  "recurring_reminders",
   "dashboard",
   "identity",
   "unknown",
@@ -62,6 +63,7 @@ export type GeminiLineIntent =
         | "summary_week"
         | "summary_month"
         | "subscription_summary"
+        | "recurring_reminders"
         | "dashboard"
         | "identity";
       confidence: number;
@@ -165,7 +167,7 @@ function buildPrompt(text: string) {
     "- shopping: snacks, Shopee, Lazada, small items, general shopping",
     "- subscriptions: Netflix, Spotify, YouTube, recurring memberships",
     "- other: clear expenses that do not fit the other categories",
-    "Recognize commands for today/week/month summaries, recurring subscription summaries, dashboard link, identity, daily budget setting, and monthly budget setting.",
+    "Recognize commands for today/week/month summaries, recurring subscription summaries, recurring payment reminders, dashboard link, identity, daily budget setting, and monthly budget setting.",
     `User message as JSON string: ${JSON.stringify(text.trim().slice(0, 500))}`,
   ].join("\n");
 }
@@ -286,6 +288,7 @@ function normalizeIntent(rawIntent: RawGeminiIntent): GeminiLineIntent {
     action === "summary_week" ||
     action === "summary_month" ||
     action === "subscription_summary" ||
+    action === "recurring_reminders" ||
     action === "dashboard" ||
     action === "identity"
   ) {

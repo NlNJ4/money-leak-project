@@ -96,6 +96,10 @@ const nextConfig: NextConfig = {
         headers: privateNoStoreHeaders,
       },
       {
+        source: "/api/expenses/export",
+        headers: privateNoStoreHeaders,
+      },
+      {
         source: "/api/summary",
         headers: privateNoStoreHeaders,
       },

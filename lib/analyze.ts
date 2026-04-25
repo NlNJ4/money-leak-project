@@ -6,6 +6,7 @@ import {
   getBangkokDateKey,
   getRecentBangkokDateKeys,
 } from "@/lib/date";
+import { getRecurringPaymentReminders } from "@/lib/recurring-reminders";
 import type {
   CategoryTotal,
   DashboardSummary,
@@ -349,6 +350,10 @@ export function buildDashboardSummary({
   const weekCategoryTotals = getCategoryTotals(weekExpenses, weekTotalBaht);
   const leakInsights = getLeakInsights(categoryTotals, monthTotalBaht);
   const recurringInsights = buildRecurringInsights(expenses);
+  const recurringReminders = getRecurringPaymentReminders({
+    insights: recurringInsights,
+    now,
+  });
   const recentExpenses = [...expenses]
     .sort(
       (a, b) => new Date(b.spentAt).getTime() - new Date(a.spentAt).getTime(),
@@ -384,6 +389,7 @@ export function buildDashboardSummary({
     dailyTrend: buildTrend(expenses, weekDateKeys),
     leakInsights,
     recurringInsights,
+    recurringReminders,
     recentExpenses,
   };
 }

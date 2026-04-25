@@ -82,13 +82,19 @@ function getReceiptExpenseWebhookEventId(
 
 async function buildDailySummaryReply(lineUserId: string) {
   const summary = await getDashboardSummary(lineUserId);
+  const nearestReminder = summary.recurringReminders[0];
 
   return [
     `วันนี้ใช้ไป ${formatBaht(summary.todayTotalBaht)} จากงบ ${formatBaht(summary.dailyBudgetBaht)}`,
     summary.dailyRemainingBaht >= 0
       ? `ยังเหลือ ${formatBaht(summary.dailyRemainingBaht)}`
       : `เกินงบแล้ว ${formatBaht(Math.abs(summary.dailyRemainingBaht))}`,
-  ].join("\n");
+    nearestReminder
+      ? `เตือนจ่ายซ้ำ: ${nearestReminder.title} ${formatBaht(nearestReminder.averageAmountBaht)} (${nearestReminder.dueLabel})`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 async function buildMonthlySummaryReply(lineUserId: string) {
@@ -137,6 +143,22 @@ async function buildRecurringSummaryReply(lineUserId: string) {
     "รายจ่ายซ้ำที่พบ:",
     ...recurringInsights.map((insight, index) =>
       `${index + 1}. ${insight.title} ประมาณ ${formatBaht(insight.averageAmountBaht)} (${insight.cadence === "monthly" ? "รายเดือน" : "รายสัปดาห์"})`,
+    ),
+  ].join("\n");
+}
+
+async function buildRecurringReminderReply(lineUserId: string) {
+  const summary = await getDashboardSummary(lineUserId);
+  const reminders = summary.recurringReminders;
+
+  if (reminders.length === 0) {
+    return "ยังไม่มีรายจ่ายซ้ำที่ใกล้ถึงใน 7 วัน";
+  }
+
+  return [
+    "เตือนจ่ายซ้ำใกล้ถึง:",
+    ...reminders.map((reminder, index) =>
+      `${index + 1}. ${reminder.title} ${formatBaht(reminder.averageAmountBaht)} - ${reminder.dueLabel}`,
     ),
   ].join("\n");
 }
@@ -235,6 +257,9 @@ async function handleGeminiIntent(
     case "subscription_summary":
       return buildRecurringSummaryReply(lineUserId);
 
+    case "recurring_reminders":
+      return buildRecurringReminderReply(lineUserId);
+
     case "dashboard": {
       const dashboardUrl = getDashboardUrl(lineUserId);
 
@@ -304,6 +329,19 @@ async function handleLineText(
     )
   ) {
     return buildRecurringSummaryReply(lineUserId);
+  }
+
+  if (
+    [
+      "เตือนจ่ายซ้ำ",
+      "เตือนรายจ่ายซ้ำ",
+      "ใกล้ตัด",
+      "reminders",
+      "reminder",
+      "due",
+    ].includes(normalized)
+  ) {
+    return buildRecurringReminderReply(lineUserId);
   }
 
   if (["dashboard", "แดชบอร์ด", "ดู dashboard"].includes(normalized)) {

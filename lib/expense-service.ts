@@ -116,6 +116,8 @@ function createDemoExpenses(now = new Date()): Expense[] {
     { day: -10, title: "กาแฟ", amountBaht: 55, hour: 9, minute: 50 },
     { day: -12, title: "ค่าส่งอาหาร", amountBaht: 39, hour: 19, minute: 45 },
     { day: -35, title: "Netflix", amountBaht: 419, hour: 7, minute: 0 },
+    { day: -26, title: "Spotify", amountBaht: 129, hour: 7, minute: 0 },
+    { day: -56, title: "Spotify", amountBaht: 129, hour: 7, minute: 0 },
   ];
 
   return rows.map((row, index) => {

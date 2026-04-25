@@ -2,9 +2,11 @@ import { BudgetProgress } from "@/components/dashboard/budget-progress";
 import { BudgetSettings } from "@/components/dashboard/budget-settings";
 import { CategoryBarList } from "@/components/dashboard/category-bar-list";
 import { DailyTrend } from "@/components/dashboard/daily-trend";
+import { ExportCsvLink } from "@/components/dashboard/export-csv-link";
 import { ExpenseList } from "@/components/dashboard/expense-list";
 import { LeakInsightList } from "@/components/dashboard/leak-insight-list";
 import { MetricCard } from "@/components/dashboard/metric-card";
+import { RecurringReminderList } from "@/components/dashboard/recurring-reminder-list";
 import { SectionPanel } from "@/components/dashboard/section-panel";
 import { StatusPill } from "@/components/dashboard/status-pill";
 import { SubscriptionInsightList } from "@/components/dashboard/subscription-insight-list";
@@ -72,6 +74,12 @@ export function DashboardView({
             <StatusPill tone={hasOverMonthlyBudget ? "danger" : "info"}>
               {hasOverMonthlyBudget ? "เดือนนี้เกินงบ" : "ติดตามเดือนนี้"}
             </StatusPill>
+            <div className="col-span-2 min-[520px]:col-span-1">
+              <ExportCsvLink
+                accessToken={accessToken}
+                lineUserId={summary.lineUserId}
+              />
+            </div>
           </div>
         </header>
 
@@ -160,6 +168,9 @@ export function DashboardView({
           </div>
 
           <div className="grid gap-4 sm:gap-6">
+            <SectionPanel title="เตือนจ่ายซ้ำ">
+              <RecurringReminderList reminders={summary.recurringReminders} />
+            </SectionPanel>
             <SectionPanel title="เงินรั่วที่ควรจับตา">
               <LeakInsightList insights={summary.leakInsights} />
             </SectionPanel>

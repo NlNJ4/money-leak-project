@@ -70,6 +70,12 @@ export type RecurringExpenseInsight = {
   suggestion: string;
 };
 
+export type RecurringPaymentReminder = RecurringExpenseInsight & {
+  daysUntilDue: number;
+  dueLabel: string;
+  urgency: "overdue" | "today" | "soon";
+};
+
 export type DashboardSummary = {
   dataMode: "demo" | "user";
   lineUserId: string;
@@ -89,5 +95,6 @@ export type DashboardSummary = {
   dailyTrend: DailySpending[];
   leakInsights: LeakInsight[];
   recurringInsights: RecurringExpenseInsight[];
+  recurringReminders: RecurringPaymentReminder[];
   recentExpenses: Expense[];
 };
