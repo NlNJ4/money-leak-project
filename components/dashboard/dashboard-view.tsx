@@ -36,21 +36,21 @@ export function DashboardView({ summary }: { summary: DashboardSummary }) {
   const hasOverMonthlyBudget = summary.monthlyRemainingBaht < 0;
 
   return (
-    <main className="min-h-screen bg-[#f6f7f9] text-zinc-950">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 border-b border-zinc-200 pb-5 md:flex-row md:items-end md:justify-between">
+    <main className="min-h-screen overflow-x-hidden bg-[linear-gradient(180deg,#eefaf4_0,#f6f7f9_22rem,#f6f7f9_100%)] text-zinc-950">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:px-8">
+        <header className="flex flex-col gap-4 border-b border-emerald-100 pb-5 pt-1 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0">
             <p className="text-sm font-medium text-emerald-700">
               เงินรั่วตรงไหน
             </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-normal text-zinc-950 md:text-4xl">
+            <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-normal text-zinc-950 md:text-4xl">
               Dashboard รายจ่าย
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600">
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 sm:mt-3">
               อัปเดตล่าสุด {formatAsOf(summary.asOf)}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 min-[520px]:flex min-[520px]:flex-wrap min-[520px]:justify-end">
             {summary.dataMode === "demo" ? (
               <StatusPill tone="neutral">ข้อมูลตัวอย่าง</StatusPill>
             ) : null}
@@ -63,7 +63,7 @@ export function DashboardView({ summary }: { summary: DashboardSummary }) {
           </div>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-3 min-[520px]:grid-cols-2 sm:gap-4 xl:grid-cols-4">
           <MetricCard
             label="ใช้วันนี้"
             value={formatBaht(summary.todayTotalBaht)}
@@ -102,10 +102,10 @@ export function DashboardView({ summary }: { summary: DashboardSummary }) {
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-          <div className="grid gap-6">
+        <section className="grid gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
+          <div className="grid gap-4 sm:gap-6">
             <SectionPanel title="งบที่ใช้ไป">
-              <div className="grid gap-6 md:grid-cols-2">
+              <div className="grid gap-5 md:grid-cols-2">
                 <BudgetProgress
                   label="งบรายวัน"
                   usedBaht={summary.todayTotalBaht}
@@ -119,7 +119,7 @@ export function DashboardView({ summary }: { summary: DashboardSummary }) {
               </div>
             </SectionPanel>
 
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
               <SectionPanel title="รายจ่ายตามหมวด">
                 <CategoryBarList categories={summary.categoryTotals} />
               </SectionPanel>
@@ -129,7 +129,7 @@ export function DashboardView({ summary }: { summary: DashboardSummary }) {
             </div>
           </div>
 
-          <div className="grid gap-6">
+          <div className="grid gap-4 sm:gap-6">
             <SectionPanel title="เงินรั่วที่ควรจับตา">
               <LeakInsightList insights={summary.leakInsights} />
             </SectionPanel>

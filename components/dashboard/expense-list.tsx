@@ -26,18 +26,18 @@ export function ExpenseList({ expenses }: { expenses: Expense[] }) {
       {expenses.map((expense) => (
         <div
           key={expense.id}
-          className="grid grid-cols-[1fr_auto] gap-4 py-3 first:pt-0 last:pb-0"
+          className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-3 first:pt-0 last:pb-0 sm:gap-4"
         >
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-zinc-950">
+            <p className="truncate text-sm font-medium leading-6 text-zinc-950">
               {expense.title}
             </p>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-0.5 text-xs leading-5 text-zinc-500">
               {getCategoryLabel(expense.category)} ·{" "}
               {formatExpenseDate(expense.spentAt)}
             </p>
           </div>
-          <p className="text-sm font-semibold text-zinc-950">
+          <p className="text-right text-sm font-semibold leading-6 text-zinc-950">
             {formatBaht(expense.amountBaht)}
           </p>
         </div>

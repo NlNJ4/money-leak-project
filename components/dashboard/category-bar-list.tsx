@@ -15,10 +15,10 @@ export function CategoryBarList({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {categories.map((category) => (
         <div key={category.category} className="min-w-0">
-          <div className="mb-2 flex items-center justify-between gap-4">
+          <div className="mb-2 flex flex-col gap-1 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between min-[420px]:gap-4">
             <div className="flex min-w-0 items-center gap-2">
               <span
                 className="h-3 w-3 shrink-0 rounded-full"
@@ -28,7 +28,7 @@ export function CategoryBarList({
                 {category.label}
               </span>
             </div>
-            <span className="shrink-0 text-sm text-zinc-500">
+            <span className="shrink-0 text-sm font-medium text-zinc-600 min-[420px]:text-right">
               {formatBaht(category.totalBaht)}
             </span>
           </div>
@@ -36,7 +36,7 @@ export function CategoryBarList({
             <div
               className="h-full rounded-full"
               style={{
-                width: `${Math.max(category.percentage, 2)}%`,
+                width: `${Math.min(Math.max(category.percentage, 2), 100)}%`,
                 backgroundColor: category.color,
               }}
             />

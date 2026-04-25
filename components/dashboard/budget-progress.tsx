@@ -24,7 +24,7 @@ export function BudgetProgress({
 
   return (
     <div className="min-w-0">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-medium text-zinc-700">{label}</p>
         <p className="text-sm text-zinc-500">
           {formatPercent(Math.round(progress))}
@@ -43,12 +43,16 @@ export function BudgetProgress({
           style={{ width: `${progress}%` }}
         />
       </div>
-      <div className="mt-3 flex items-center justify-between gap-4 text-sm">
-        <span className="font-medium text-zinc-950">
+      <div className="mt-3 flex flex-col gap-1 text-sm min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between min-[420px]:gap-4">
+        <span className="font-medium leading-6 text-zinc-950">
           {formatBaht(usedBaht)} / {formatBaht(budgetBaht)}
         </span>
         <span
-          className={remainingBaht >= 0 ? "text-emerald-700" : "text-rose-700"}
+          className={
+            remainingBaht >= 0
+              ? "font-medium leading-6 text-emerald-700"
+              : "font-medium leading-6 text-rose-700"
+          }
         >
           {remainingBaht >= 0
             ? `เหลือ ${formatBaht(remainingBaht)}`
