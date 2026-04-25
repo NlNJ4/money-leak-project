@@ -209,6 +209,16 @@ async function replyText(replyToken: string, text: string) {
   ]);
 }
 
+async function safeReplyText(replyToken: string, text: string) {
+  try {
+    await replyText(replyToken, text);
+  } catch (error) {
+    console.error("LINE reply failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
 async function handleLineEvent(event: LineWebhookEvent) {
   if (event.type !== "message") return;
   if (event.message?.type !== "text") return;
@@ -219,12 +229,15 @@ async function handleLineEvent(event: LineWebhookEvent) {
 
   const lineUserId = getLineUserId(event);
   if (!lineUserId) {
-    await replyText(event.replyToken, "ไม่พบ LINE user id สำหรับบันทึกรายจ่าย");
+    await safeReplyText(
+      event.replyToken,
+      "ไม่พบ LINE user id สำหรับบันทึกรายจ่าย",
+    );
     return;
   }
 
   if (text.length > MAX_LINE_TEXT_LENGTH) {
-    await replyText(
+    await safeReplyText(
       event.replyToken,
       "ข้อความยาวเกินไป กรุณาส่งรายการให้สั้นลง เช่น ข้าว 55",
     );
@@ -232,7 +245,7 @@ async function handleLineEvent(event: LineWebhookEvent) {
   }
 
   if (isRateLimited(`line:${lineUserId}`, lineMessageRateLimit)) {
-    await replyText(
+    await safeReplyText(
       event.replyToken,
       "ส่งเร็วเกินไป กรุณารอสักครู่แล้วลองใหม่",
     );
@@ -240,13 +253,16 @@ async function handleLineEvent(event: LineWebhookEvent) {
   }
 
   try {
-    await replyText(event.replyToken, await handleLineText(lineUserId, text));
+    await safeReplyText(
+      event.replyToken,
+      await handleLineText(lineUserId, text),
+    );
   } catch (error) {
     console.error("LINE event processing failed", {
       message: error instanceof Error ? error.message : "Unknown error",
     });
 
-    await replyText(
+    await safeReplyText(
       event.replyToken,
       "ยังบันทึกรายการไม่ได้ กรุณาลองใหม่อีกครั้ง",
     );
@@ -255,8 +271,9 @@ async function handleLineEvent(event: LineWebhookEvent) {
 
 export async function POST(request: Request) {
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
-  if (!channelSecret) {
+  if (!channelSecret || !channelAccessToken) {
     return NextResponse.json(
       { error: "LINE webhook is not configured" },
       { status: 500 },

@@ -9,6 +9,7 @@ import {
   MAX_JSON_BODY_BYTES,
   RequestBodyTooLargeError,
   getRequestAccessToken,
+  getSingleUrlSearchParam,
   hasLineUserDataAccess,
   normalizeLineUserId,
   readRequestTextWithLimit,
@@ -37,9 +38,16 @@ function isExpenseCategory(value: unknown): value is ExpenseCategory {
 }
 
 export async function GET(request: NextRequest) {
-  const lineUserId = normalizeLineUserId(
-    request.nextUrl.searchParams.get("lineUserId"),
+  const lineUserIdParam = getSingleUrlSearchParam(
+    request.nextUrl.searchParams,
+    "lineUserId",
   );
+
+  if (lineUserIdParam === null) {
+    return NextResponse.json({ error: "Invalid lineUserId" }, { status: 400 });
+  }
+
+  const lineUserId = normalizeLineUserId(lineUserIdParam);
 
   if (!lineUserId) {
     return NextResponse.json({ error: "Invalid lineUserId" }, { status: 400 });

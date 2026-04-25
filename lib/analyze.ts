@@ -220,7 +220,7 @@ export function buildDashboardSummary({
       now,
     ),
     categoryTotals,
-    dailyTrend: buildTrend(monthExpenses, now),
+    dailyTrend: buildTrend(expenses, now),
     leakInsights,
     recentExpenses,
   };

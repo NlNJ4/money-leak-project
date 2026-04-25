@@ -8,6 +8,8 @@ export const MAX_LINE_EVENTS = 20;
 export const MAX_LINE_TEXT_LENGTH = 500;
 export const MAX_LINE_WEBHOOK_BODY_BYTES = 64 * 1024;
 
+const MAX_RATE_LIMIT_KEYS = 5_000;
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60_000;
 const LINE_USER_ID_PATTERN = /^U[a-f0-9]{32}$/i;
 const DASHBOARD_ACCESS_TOKEN_PARAM = "accessToken";
 const DASHBOARD_TOKEN_VERSION = "v1";
@@ -20,6 +22,7 @@ type RateLimitEntry = {
 export type SearchParamValue = string | string[] | undefined;
 
 const globalForSecurity = globalThis as typeof globalThis & {
+  __moneyLeakLastRateLimitCleanupAt?: number;
   __moneyLeakRateLimits?: Map<string, RateLimitEntry>;
 };
 
@@ -57,6 +60,18 @@ export function getSingleSearchParam(value: SearchParamValue) {
   return null;
 }
 
+export function getSingleUrlSearchParam(
+  searchParams: URLSearchParams,
+  key: string,
+) {
+  const values = searchParams.getAll(key);
+
+  if (values.length === 0) return undefined;
+  if (values.length === 1) return values[0];
+
+  return null;
+}
+
 export function getRequestAccessToken(request: Request) {
   const authorization = request.headers.get("authorization")?.trim();
 
@@ -72,7 +87,12 @@ export function getRequestAccessToken(request: Request) {
   if (headerToken) return headerToken;
 
   try {
-    return new URL(request.url).searchParams.get(DASHBOARD_ACCESS_TOKEN_PARAM);
+    const accessToken = getSingleUrlSearchParam(
+      new URL(request.url).searchParams,
+      DASHBOARD_ACCESS_TOKEN_PARAM,
+    );
+
+    return accessToken ?? null;
   } catch {
     return null;
   }
@@ -128,9 +148,13 @@ export function isRateLimited(
 ) {
   const now = Date.now();
   const store = getRateLimitStore();
+  pruneRateLimitStore(store, now);
+
   const current = store.get(key);
 
   if (!current || current.resetAt <= now) {
+    if (store.size >= MAX_RATE_LIMIT_KEYS) return true;
+
     store.set(key, { count: 1, resetAt: now + windowMs });
     return false;
   }
@@ -189,6 +213,18 @@ function getRateLimitStore() {
   }
 
   return globalForSecurity.__moneyLeakRateLimits;
+}
+
+function pruneRateLimitStore(store: Map<string, RateLimitEntry>, now: number) {
+  const lastCleanupAt = globalForSecurity.__moneyLeakLastRateLimitCleanupAt ?? 0;
+
+  if (now - lastCleanupAt < RATE_LIMIT_CLEANUP_INTERVAL_MS) return;
+
+  for (const [key, entry] of store) {
+    if (entry.resetAt <= now) store.delete(key);
+  }
+
+  globalForSecurity.__moneyLeakLastRateLimitCleanupAt = now;
 }
 
 function safeEqual(left: string, right: string) {
