@@ -3,10 +3,8 @@ import { buildDashboardSummary } from "@/lib/analyze";
 import { categoryOrder } from "@/lib/categories";
 import { DEMO_LINE_USER_ID } from "@/lib/constants";
 import {
-  getBangkokCalendarContext,
   getBangkokDateKey,
   getBangkokDayStartIso,
-  getBangkokMonthStartIso,
   getRecentBangkokDateKeys,
   toBangkokIso,
 } from "@/lib/date";
@@ -68,6 +66,7 @@ const globalForMoneyLeak = globalThis as typeof globalThis & {
 
 const DEFAULT_EXPENSE_QUERY_LIMIT = 100;
 const DASHBOARD_EXPENSE_QUERY_LIMIT = 1_000;
+const DASHBOARD_INSIGHT_LOOKBACK_DAYS = 90;
 const MAX_EXPENSE_QUERY_LIMIT = 1_000;
 const MAX_LINE_WEBHOOK_EVENT_ID_LENGTH = 128;
 
@@ -116,6 +115,7 @@ function createDemoExpenses(now = new Date()): Expense[] {
     { day: -8, title: "Shopee ของใช้", amountBaht: 249, hour: 21, minute: 10 },
     { day: -10, title: "กาแฟ", amountBaht: 55, hour: 9, minute: 50 },
     { day: -12, title: "ค่าส่งอาหาร", amountBaht: 39, hour: 19, minute: 45 },
+    { day: -35, title: "Netflix", amountBaht: 419, hour: 7, minute: 0 },
   ];
 
   return rows.map((row, index) => {
@@ -734,13 +734,14 @@ export async function getDashboardSummary(
   now = new Date(),
 ): Promise<DashboardSummary> {
   const budget = await getBudget(lineUserId);
-  const { monthKey } = getBangkokCalendarContext(now);
-  const recentStartKey = getRecentBangkokDateKeys(7, now)[0];
-  const monthStartIso = getBangkokMonthStartIso(monthKey);
-  const trendStartIso = getBangkokDayStartIso(recentStartKey);
+  const insightStartKey = getRecentBangkokDateKeys(
+    DASHBOARD_INSIGHT_LOOKBACK_DAYS,
+    now,
+  )[0];
+  const insightStartIso = getBangkokDayStartIso(insightStartKey);
   const expenses = await listExpenses(lineUserId, {
     limit: DASHBOARD_EXPENSE_QUERY_LIMIT,
-    since: monthStartIso < trendStartIso ? monthStartIso : trendStartIso,
+    since: insightStartIso,
   });
 
   return buildDashboardSummary({

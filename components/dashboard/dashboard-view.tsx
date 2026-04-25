@@ -7,6 +7,7 @@ import { LeakInsightList } from "@/components/dashboard/leak-insight-list";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { SectionPanel } from "@/components/dashboard/section-panel";
 import { StatusPill } from "@/components/dashboard/status-pill";
+import { SubscriptionInsightList } from "@/components/dashboard/subscription-insight-list";
 import { formatBaht } from "@/lib/format";
 import type { DashboardSummary } from "@/lib/types";
 
@@ -161,6 +162,9 @@ export function DashboardView({
           <div className="grid gap-4 sm:gap-6">
             <SectionPanel title="เงินรั่วที่ควรจับตา">
               <LeakInsightList insights={summary.leakInsights} />
+            </SectionPanel>
+            <SectionPanel title="รายจ่ายซ้ำ">
+              <SubscriptionInsightList insights={summary.recurringInsights} />
             </SectionPanel>
             <SectionPanel title="รายการล่าสุด">
               <ExpenseList

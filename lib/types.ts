@@ -53,6 +53,23 @@ export type LeakInsight = {
   suggestion: string;
 };
 
+export type RecurringCadence = "weekly" | "monthly";
+
+export type RecurringExpenseInsight = {
+  key: string;
+  title: string;
+  category: ExpenseCategory;
+  cadence: RecurringCadence;
+  count: number;
+  averageAmountBaht: number;
+  totalBaht: number;
+  lastSpentAt: string;
+  nextExpectedDateKey: string | null;
+  confidence: number;
+  message: string;
+  suggestion: string;
+};
+
 export type DashboardSummary = {
   dataMode: "demo" | "user";
   lineUserId: string;
@@ -71,5 +88,6 @@ export type DashboardSummary = {
   categoryTotals: CategoryTotal[];
   dailyTrend: DailySpending[];
   leakInsights: LeakInsight[];
+  recurringInsights: RecurringExpenseInsight[];
   recentExpenses: Expense[];
 };

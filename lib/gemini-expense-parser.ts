@@ -1,9 +1,12 @@
 import { categoryOrder } from "@/lib/categories";
+import {
+  generateGeminiJson,
+  isGeminiConfigured,
+  parseGeminiJsonObject,
+} from "@/lib/gemini";
 import { detectCategory } from "@/lib/parser";
 import type { ExpenseCategory } from "@/lib/types";
 
-const DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview";
-const GEMINI_TIMEOUT_MS = 6000;
 const MIN_CONFIDENCE = 0.55;
 
 const intentActions = [
@@ -13,6 +16,7 @@ const intentActions = [
   "summary_today",
   "summary_week",
   "summary_month",
+  "subscription_summary",
   "dashboard",
   "identity",
   "unknown",
@@ -31,16 +35,6 @@ type RawGeminiIntent = {
   needsClarification?: unknown;
   clarificationQuestion?: unknown;
   confidence?: unknown;
-};
-
-type GeminiGenerateContentResponse = {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string;
-      }>;
-    };
-  }>;
 };
 
 export type GeminiLineIntent =
@@ -67,6 +61,7 @@ export type GeminiLineIntent =
         | "summary_today"
         | "summary_week"
         | "summary_month"
+        | "subscription_summary"
         | "dashboard"
         | "identity";
       confidence: number;
@@ -153,14 +148,7 @@ const responseJsonSchema = {
 } as const;
 
 export function isGeminiExpenseParserConfigured() {
-  return Boolean(process.env.GEMINI_API_KEY?.trim());
-}
-
-function getGeminiModel() {
-  return (process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL).replace(
-    /^models\//,
-    "",
-  );
+  return isGeminiConfigured();
 }
 
 function buildPrompt(text: string) {
@@ -177,7 +165,7 @@ function buildPrompt(text: string) {
     "- shopping: snacks, Shopee, Lazada, small items, general shopping",
     "- subscriptions: Netflix, Spotify, YouTube, recurring memberships",
     "- other: clear expenses that do not fit the other categories",
-    "Recognize commands for today/week/month summaries, dashboard link, identity, daily budget setting, and monthly budget setting.",
+    "Recognize commands for today/week/month summaries, recurring subscription summaries, dashboard link, identity, daily budget setting, and monthly budget setting.",
     `User message as JSON string: ${JSON.stringify(text.trim().slice(0, 500))}`,
   ].join("\n");
 }
@@ -212,28 +200,6 @@ function toQuestion(value: unknown) {
   if (typeof value === "string" && value.trim()) return value.trim();
 
   return "ขอรายละเอียดเป็นชื่อรายการและจำนวนเงินในข้อความเดียว เช่น ข้าว 55";
-}
-
-function extractResponseText(payload: GeminiGenerateContentResponse) {
-  return (
-    payload.candidates?.[0]?.content?.parts?.find((part) => part.text)?.text ??
-    null
-  );
-}
-
-function parseJsonObject(text: string) {
-  try {
-    return JSON.parse(text) as RawGeminiIntent;
-  } catch {
-    const objectMatch = text.match(/\{[\s\S]*\}/);
-    if (!objectMatch) return null;
-
-    try {
-      return JSON.parse(objectMatch[0]) as RawGeminiIntent;
-    } catch {
-      return null;
-    }
-  }
 }
 
 function normalizeIntent(rawIntent: RawGeminiIntent): GeminiLineIntent {
@@ -319,6 +285,7 @@ function normalizeIntent(rawIntent: RawGeminiIntent): GeminiLineIntent {
     action === "summary_today" ||
     action === "summary_week" ||
     action === "summary_month" ||
+    action === "subscription_summary" ||
     action === "dashboard" ||
     action === "identity"
   ) {
@@ -345,59 +312,16 @@ function normalizeIntent(rawIntent: RawGeminiIntent): GeminiLineIntent {
 export async function parseLineIntentWithGemini(
   text: string,
 ): Promise<GeminiLineIntent | null> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const responseText = await generateGeminiJson({
+    parts: [{ text: buildPrompt(text) }],
+    responseJsonSchema,
+    logLabel: "Gemini intent parse failed",
+  });
 
-  if (!apiKey) return null;
+  if (!responseText) return null;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  const rawIntent = parseGeminiJsonObject<RawGeminiIntent>(responseText);
+  if (!rawIntent) return null;
 
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: buildPrompt(text) }],
-            },
-          ],
-          generationConfig: {
-            maxOutputTokens: 384,
-            responseMimeType: "application/json",
-            responseJsonSchema,
-            temperature: 0,
-          },
-        }),
-        signal: controller.signal,
-      },
-    );
-
-    if (!response.ok) {
-      console.error("Gemini intent parse failed", { status: response.status });
-      return null;
-    }
-
-    const payload = (await response.json()) as GeminiGenerateContentResponse;
-    const responseText = extractResponseText(payload);
-
-    if (!responseText) return null;
-
-    const rawIntent = parseJsonObject(responseText);
-    if (!rawIntent) return null;
-
-    return normalizeIntent(rawIntent);
-  } catch (error) {
-    console.error("Gemini intent parse failed", {
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return normalizeIntent(rawIntent);
 }

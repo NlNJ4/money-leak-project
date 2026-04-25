@@ -10,9 +10,18 @@ import {
   parseLineIntentWithGemini,
 } from "@/lib/gemini-expense-parser";
 import {
+  isGeminiReceiptParserConfigured,
+  type ParsedReceipt,
+  parseReceiptImageWithGemini,
+} from "@/lib/gemini-receipt-parser";
+import {
+  getLineImageContent,
+  LineContentTooLargeError,
+  type LineImageMessageEvent,
   type LineWebhookEvent,
   type LineWebhookPayload,
   replyLineMessage,
+  UnsupportedLineImageError,
   verifyLineSignature,
 } from "@/lib/line";
 import {
@@ -39,6 +48,7 @@ const lineMessageRateLimit = {
   limit: 30,
   windowMs: 60_000,
 };
+const MAX_LINE_WEBHOOK_EVENT_ID_LENGTH = 128;
 
 function getLineUserId(event: LineWebhookEvent) {
   return normalizeLineUserId(event.source?.userId, "") || null;
@@ -54,6 +64,20 @@ function getDashboardUrl(lineUserId: string) {
   appendDashboardAccessToken(url, lineUserId);
 
   return url.toString();
+}
+
+function getReceiptExpenseWebhookEventId(
+  lineWebhookEventId: string | null | undefined,
+  index: number,
+) {
+  if (!lineWebhookEventId) return null;
+
+  const suffix = `:receipt:${index}`;
+
+  return `${lineWebhookEventId.slice(
+    0,
+    MAX_LINE_WEBHOOK_EVENT_ID_LENGTH - suffix.length,
+  )}${suffix}`;
 }
 
 async function buildDailySummaryReply(lineUserId: string) {
@@ -101,6 +125,22 @@ async function buildWeeklySummaryReply(lineUserId: string) {
     .join("\n");
 }
 
+async function buildRecurringSummaryReply(lineUserId: string) {
+  const summary = await getDashboardSummary(lineUserId);
+  const recurringInsights = summary.recurringInsights;
+
+  if (recurringInsights.length === 0) {
+    return "ยังไม่พบรายจ่ายซ้ำที่ชัดเจนใน 90 วันล่าสุด";
+  }
+
+  return [
+    "รายจ่ายซ้ำที่พบ:",
+    ...recurringInsights.map((insight, index) =>
+      `${index + 1}. ${insight.title} ประมาณ ${formatBaht(insight.averageAmountBaht)} (${insight.cadence === "monthly" ? "รายเดือน" : "รายสัปดาห์"})`,
+    ),
+  ].join("\n");
+}
+
 async function buildSavedExpenseReply(
   lineUserId: string,
   expense: ParsedExpenseText & { isNeed?: boolean },
@@ -119,6 +159,47 @@ async function buildSavedExpenseReply(
     `บันทึกแล้ว: ${expense.title} ${formatBaht(expense.amountBaht)}`,
     await buildDailySummaryReply(lineUserId),
   ].join("\n");
+}
+
+async function buildSavedReceiptReply(
+  lineUserId: string,
+  receipt: ParsedReceipt,
+  lineWebhookEventId?: string | null,
+) {
+  const savedExpenses = await Promise.all(
+    receipt.expenses.map((expense, index) =>
+      createExpense({
+        lineUserId,
+        lineWebhookEventId: getReceiptExpenseWebhookEventId(
+          lineWebhookEventId,
+          index,
+        ),
+        title: expense.title,
+        amountBaht: expense.amountBaht,
+        category: expense.category,
+        isNeed: expense.isNeed,
+        spentAt: expense.spentAt,
+      }),
+    ),
+  );
+  const totalBaht = savedExpenses.reduce(
+    (sum, expense) => sum + expense.amountBaht,
+    0,
+  );
+  const previewLines = savedExpenses
+    .slice(0, 5)
+    .map((expense) => `- ${expense.title} ${formatBaht(expense.amountBaht)}`);
+  const hiddenCount = savedExpenses.length - previewLines.length;
+
+  return [
+    `บันทึกจากรูปแล้ว ${savedExpenses.length} รายการ รวม ${formatBaht(totalBaht)}`,
+    receipt.merchantName ? `ร้าน: ${receipt.merchantName}` : null,
+    ...previewLines,
+    hiddenCount > 0 ? `และอีก ${hiddenCount} รายการ` : null,
+    await buildDailySummaryReply(lineUserId),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 async function handleGeminiIntent(
@@ -150,6 +231,9 @@ async function handleGeminiIntent(
 
     case "summary_month":
       return buildMonthlySummaryReply(lineUserId);
+
+    case "subscription_summary":
+      return buildRecurringSummaryReply(lineUserId);
 
     case "dashboard": {
       const dashboardUrl = getDashboardUrl(lineUserId);
@@ -214,6 +298,14 @@ async function handleLineText(
     return buildMonthlySummaryReply(lineUserId);
   }
 
+  if (
+    ["รายจ่ายซ้ำ", "สมาชิก", "subscriptions", "subscription", "subs"].includes(
+      normalized,
+    )
+  ) {
+    return buildRecurringSummaryReply(lineUserId);
+  }
+
   if (["dashboard", "แดชบอร์ด", "ดู dashboard"].includes(normalized)) {
     const dashboardUrl = getDashboardUrl(lineUserId);
 
@@ -258,6 +350,54 @@ async function handleLineText(
   return buildSavedExpenseReply(lineUserId, parsed, lineWebhookEventId);
 }
 
+async function handleLineImage(
+  lineUserId: string,
+  event: LineImageMessageEvent,
+) {
+  if (!isGeminiReceiptParserConfigured()) {
+    return "ยังไม่ได้ตั้งค่า GEMINI_API_KEY สำหรับอ่านรูปใบเสร็จ";
+  }
+
+  if (event.message.contentProvider?.type === "external") {
+    return "ตอนนี้รองรับรูปที่ส่งเข้ามาใน LINE โดยตรงเท่านั้น";
+  }
+
+  try {
+    const image = await getLineImageContent(event.message.id);
+    const receipt = await parseReceiptImageWithGemini({
+      imageBase64: image.data.toString("base64"),
+      mimeType: image.mimeType,
+    });
+
+    if (!receipt || receipt.expenses.length === 0) {
+      return (
+        receipt?.clarificationQuestion ??
+        "อ่านรูปนี้ยังไม่ชัด ลองส่งรูปใบเสร็จที่เห็นยอดเงินครบอีกครั้ง"
+      );
+    }
+
+    return buildSavedReceiptReply(
+      lineUserId,
+      receipt,
+      event.webhookEventId,
+    );
+  } catch (error) {
+    if (error instanceof LineContentTooLargeError) {
+      return "รูปใหญ่เกินไป กรุณาส่งรูปใบเสร็จที่เล็กกว่า 5MB";
+    }
+
+    if (error instanceof UnsupportedLineImageError) {
+      return "รองรับเฉพาะรูป JPG, PNG หรือ WebP";
+    }
+
+    console.error("LINE receipt image processing failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+
+    return "ยังอ่านรูปใบเสร็จไม่ได้ กรุณาลองส่งรูปใหม่อีกครั้ง";
+  }
+}
+
 async function replyText(replyToken: string, text: string) {
   await replyLineMessage(replyToken, [
     {
@@ -279,25 +419,13 @@ async function safeReplyText(replyToken: string, text: string) {
 
 async function handleLineEvent(event: LineWebhookEvent) {
   if (event.type !== "message") return;
-  if (event.message?.type !== "text") return;
   if (!event.replyToken) return;
-
-  const text = event.message.text;
-  if (typeof text !== "string") return;
 
   const lineUserId = getLineUserId(event);
   if (!lineUserId) {
     await safeReplyText(
       event.replyToken,
       "ไม่พบ LINE user id สำหรับบันทึกรายจ่าย",
-    );
-    return;
-  }
-
-  if (text.length > MAX_LINE_TEXT_LENGTH) {
-    await safeReplyText(
-      event.replyToken,
-      "ข้อความยาวเกินไป กรุณาส่งรายการให้สั้นลง เช่น ข้าว 55",
     );
     return;
   }
@@ -311,10 +439,31 @@ async function handleLineEvent(event: LineWebhookEvent) {
   }
 
   try {
-    await safeReplyText(
-      event.replyToken,
-      await handleLineText(lineUserId, text, event.webhookEventId),
-    );
+    if (event.message?.type === "text") {
+      const text = event.message.text;
+      if (typeof text !== "string") return;
+
+      if (text.length > MAX_LINE_TEXT_LENGTH) {
+        await safeReplyText(
+          event.replyToken,
+          "ข้อความยาวเกินไป กรุณาส่งรายการให้สั้นลง เช่น ข้าว 55",
+        );
+        return;
+      }
+
+      await safeReplyText(
+        event.replyToken,
+        await handleLineText(lineUserId, text, event.webhookEventId),
+      );
+      return;
+    }
+
+    if (event.message?.type === "image" && event.message.id) {
+      await safeReplyText(
+        event.replyToken,
+        await handleLineImage(lineUserId, event as LineImageMessageEvent),
+      );
+    }
   } catch (error) {
     console.error("LINE event processing failed", {
       message: error instanceof Error ? error.message : "Unknown error",

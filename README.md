@@ -64,9 +64,11 @@ https://your-domain.example/api/line/webhook
 Supported LINE commands:
 
 - `ข้าว 55` or `milk tea 45` records an expense.
+- Send a receipt image to extract and save receipt expenses with Gemini.
 - `สรุปวันนี้` or `today` returns today's summary.
 - `สรุปสัปดาห์นี้` or `week` returns the latest 7-day summary.
 - `สรุปเดือนนี้` or `month` returns this month's summary.
+- `รายจ่ายซ้ำ` or `subs` returns recurring subscription-like expenses.
 - `ตั้งงบ 200` sets the daily budget.
 - `ตั้งงบเดือน 6000` sets the monthly budget.
 - `dashboard` returns a private dashboard link.
@@ -97,6 +99,7 @@ taskkill /PID <PID> /F
 ## Security Notes
 
 - LINE webhook requests verify `x-line-signature` before JSON processing.
+- Receipt images are downloaded from LINE only after signature verification, capped to 5MB, restricted to JPG/PNG/WebP, sent to Gemini for extraction, and not stored by the app.
 - Private dashboard/API access is scoped to a LINE user id using a per-user HMAC token.
 - Dashboard and private API responses are marked `no-store`.
 - LINE expense retries are deduplicated with `line_webhook_event_id`.
@@ -106,5 +109,6 @@ taskkill /PID <PID> /F
 
 - Edit or delete recent expenses from the dashboard.
 - Review the latest 7-day total, daily average, and top spending category.
+- Detect recurring subscription-like spending from the latest 90 days.
 - Update daily and monthly budgets from the budget section.
 - Dashboard mutations call scoped API routes and refresh server-rendered summaries after saving.

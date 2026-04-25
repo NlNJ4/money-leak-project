@@ -1,5 +1,6 @@
 import { categoryConfig, categoryOrder } from "@/lib/categories";
 import {
+  addDaysToDateKey,
   formatDateKeyThai,
   getBangkokCalendarContext,
   getBangkokDateKey,
@@ -12,6 +13,8 @@ import type {
   ExpenseCategory,
   LeakInsight,
   LeakSeverity,
+  RecurringCadence,
+  RecurringExpenseInsight,
   UserBudget,
 } from "@/lib/types";
 
@@ -139,6 +142,151 @@ function getLeakInsights(categoryTotals: CategoryTotal[], monthTotalBaht: number
     .slice(0, 3);
 }
 
+const subscriptionTitleHints = [
+  "netflix",
+  "spotify",
+  "youtube",
+  "icloud",
+  "google one",
+  "chatgpt",
+  "gemini",
+  "canva",
+  "adobe",
+  "subscription",
+  "membership",
+  "member",
+  "รายเดือน",
+  "สมาชิก",
+];
+
+function normalizeRecurringKey(title: string) {
+  return title
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isSubscriptionCandidate(expense: Expense) {
+  const normalizedTitle = expense.title.toLowerCase();
+
+  return (
+    expense.category === "subscriptions" ||
+    subscriptionTitleHints.some((hint) => normalizedTitle.includes(hint))
+  );
+}
+
+function getMedian(values: number[]) {
+  if (values.length === 0) return 0;
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const middleIndex = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2 === 1) return sorted[middleIndex];
+
+  return Math.round((sorted[middleIndex - 1] + sorted[middleIndex]) / 2);
+}
+
+function getDaysBetweenDateKeys(leftDateKey: string, rightDateKey: string) {
+  const left = new Date(`${leftDateKey}T00:00:00.000Z`).getTime();
+  const right = new Date(`${rightDateKey}T00:00:00.000Z`).getTime();
+
+  return Math.round((right - left) / 86_400_000);
+}
+
+function getRecurringCadence(intervalDays: number): RecurringCadence | null {
+  if (intervalDays >= 24 && intervalDays <= 38) return "monthly";
+  if (intervalDays >= 5 && intervalDays <= 9) return "weekly";
+
+  return null;
+}
+
+function getCadenceLabel(cadence: RecurringCadence) {
+  return cadence === "monthly" ? "รายเดือน" : "รายสัปดาห์";
+}
+
+function buildRecurringInsights(expenses: Expense[]) {
+  const groups = new Map<string, Expense[]>();
+
+  for (const expense of expenses.filter(isSubscriptionCandidate)) {
+    const key = normalizeRecurringKey(expense.title);
+    if (!key) continue;
+
+    groups.set(key, [...(groups.get(key) ?? []), expense]);
+  }
+
+  return Array.from(groups.entries())
+    .map<RecurringExpenseInsight | null>(([key, groupExpenses]) => {
+      const sortedExpenses = [...groupExpenses].sort(
+        (a, b) =>
+          new Date(a.spentAt).getTime() - new Date(b.spentAt).getTime(),
+      );
+
+      if (sortedExpenses.length < 2) return null;
+
+      const dateKeys = sortedExpenses.map((expense) =>
+        getBangkokDateKey(new Date(expense.spentAt)),
+      );
+      const intervals = dateKeys
+        .slice(1)
+        .map((dateKey, index) =>
+          getDaysBetweenDateKeys(dateKeys[index], dateKey),
+        )
+        .filter((interval) => interval > 0);
+      const medianIntervalDays = getMedian(intervals);
+      const cadence = getRecurringCadence(medianIntervalDays);
+
+      if (!cadence) return null;
+
+      const totalBaht = sumExpenses(sortedExpenses);
+      const averageAmountBaht = Math.round(totalBaht / sortedExpenses.length);
+      const amounts = sortedExpenses.map((expense) => expense.amountBaht);
+      const amountRange = Math.max(...amounts) - Math.min(...amounts);
+      const isStableAmount =
+        amountRange <= Math.max(25, Math.round(averageAmountBaht * 0.2));
+
+      if (!isStableAmount) return null;
+
+      const lastExpense = sortedExpenses[sortedExpenses.length - 1];
+      const nextExpectedDateKey = addDaysToDateKey(
+        getBangkokDateKey(new Date(lastExpense.spentAt)),
+        medianIntervalDays,
+      );
+      const confidence = clamp(
+        45 + sortedExpenses.length * 15 + (isStableAmount ? 20 : 0),
+        0,
+        95,
+      );
+      const cadenceLabel = getCadenceLabel(cadence);
+
+      return {
+        key,
+        title: lastExpense.title,
+        category: lastExpense.category,
+        cadence,
+        count: sortedExpenses.length,
+        averageAmountBaht,
+        totalBaht,
+        lastSpentAt: lastExpense.spentAt,
+        nextExpectedDateKey,
+        confidence,
+        message: `${lastExpense.title} ดูเหมือนเป็นค่าใช้จ่าย${cadenceLabel} ${sortedExpenses.length} ครั้ง`,
+        suggestion: `เตรียมไว้ประมาณ ${averageAmountBaht} บาท รอบถัดไปใกล้ ${formatDateKeyThai(nextExpectedDateKey)}`,
+      };
+    })
+    .filter(
+      (insight): insight is RecurringExpenseInsight => insight !== null,
+    )
+    .sort((a, b) => {
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+
+      return b.averageAmountBaht - a.averageAmountBaht;
+    })
+    .slice(0, 3);
+}
+
 function getLeakScore(
   todayTotalBaht: number,
   monthTotalBaht: number,
@@ -200,6 +348,7 @@ export function buildDashboardSummary({
   const categoryTotals = getCategoryTotals(monthExpenses, monthTotalBaht);
   const weekCategoryTotals = getCategoryTotals(weekExpenses, weekTotalBaht);
   const leakInsights = getLeakInsights(categoryTotals, monthTotalBaht);
+  const recurringInsights = buildRecurringInsights(expenses);
   const recentExpenses = [...expenses]
     .sort(
       (a, b) => new Date(b.spentAt).getTime() - new Date(a.spentAt).getTime(),
@@ -234,6 +383,7 @@ export function buildDashboardSummary({
     categoryTotals,
     dailyTrend: buildTrend(expenses, weekDateKeys),
     leakInsights,
+    recurringInsights,
     recentExpenses,
   };
 }
