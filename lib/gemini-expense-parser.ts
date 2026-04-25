@@ -326,8 +326,10 @@ export async function parseLineIntentWithGemini(
             },
           ],
           generationConfig: {
+            maxOutputTokens: 384,
             responseMimeType: "application/json",
             responseJsonSchema,
+            temperature: 0,
           },
         }),
         signal: controller.signal,

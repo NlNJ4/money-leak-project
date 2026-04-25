@@ -1,14 +1,35 @@
 import { DashboardView } from "@/components/dashboard/dashboard-view";
+import { PrivateDashboardMessage } from "@/components/dashboard/private-dashboard-message";
 import {
   getDefaultLineUserId,
   getDashboardSummary,
 } from "@/lib/expense-service";
+import { getSingleSearchParam, hasLineUserDataAccess } from "@/lib/security";
 import { connection } from "next/server";
 
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ accessToken?: string | string[] }>;
+}) {
   await connection();
 
-  const summary = await getDashboardSummary(getDefaultLineUserId());
+  const params = await searchParams;
+  const accessToken = getSingleSearchParam(params.accessToken);
+  const lineUserId = getDefaultLineUserId();
+
+  if (accessToken === null) return <PrivateDashboardMessage />;
+
+  if (
+    !hasLineUserDataAccess({
+      lineUserId,
+      accessToken,
+    })
+  ) {
+    return <PrivateDashboardMessage />;
+  }
+
+  const summary = await getDashboardSummary(lineUserId);
 
   return <DashboardView summary={summary} />;
 }

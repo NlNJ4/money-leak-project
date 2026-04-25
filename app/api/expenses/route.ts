@@ -5,10 +5,25 @@ import {
   listExpenses,
 } from "@/lib/expense-service";
 import { detectCategory, parseExpenseText } from "@/lib/parser";
+import {
+  MAX_JSON_BODY_BYTES,
+  RequestBodyTooLargeError,
+  getRequestAccessToken,
+  hasLineUserDataAccess,
+  normalizeLineUserId,
+  readRequestTextWithLimit,
+} from "@/lib/security";
 import type { ExpenseCategory } from "@/lib/types";
 import { type NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+function unauthorizedResponse() {
+  return NextResponse.json(
+    { error: "Private dashboard access token is required" },
+    { status: 401 },
+  );
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -22,8 +37,22 @@ function isExpenseCategory(value: unknown): value is ExpenseCategory {
 }
 
 export async function GET(request: NextRequest) {
-  const lineUserId =
-    request.nextUrl.searchParams.get("lineUserId") ?? DEMO_LINE_USER_ID;
+  const lineUserId = normalizeLineUserId(
+    request.nextUrl.searchParams.get("lineUserId"),
+  );
+
+  if (!lineUserId) {
+    return NextResponse.json({ error: "Invalid lineUserId" }, { status: 400 });
+  }
+
+  if (
+    !hasLineUserDataAccess({
+      lineUserId,
+      accessToken: getRequestAccessToken(request),
+    })
+  ) {
+    return unauthorizedResponse();
+  }
 
   return NextResponse.json({
     dataMode: lineUserId === DEMO_LINE_USER_ID ? "demo" : "user",
@@ -32,7 +61,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: Request) {
-  if (!request.headers.get("content-type")?.includes("application/json")) {
+  if (
+    !request.headers
+      .get("content-type")
+      ?.toLowerCase()
+      .includes("application/json")
+  ) {
     return NextResponse.json(
       { error: "Content-Type must be application/json" },
       { status: 415 },
@@ -42,8 +76,17 @@ export async function POST(request: Request) {
   let body: unknown;
 
   try {
-    body = await request.json();
-  } catch {
+    body = JSON.parse(
+      await readRequestTextWithLimit(request, MAX_JSON_BODY_BYTES),
+    );
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return NextResponse.json(
+        { error: "Request body is too large" },
+        { status: 413 },
+      );
+    }
+
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
@@ -51,10 +94,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const lineUserId =
-    typeof body.lineUserId === "string" && body.lineUserId.trim()
-      ? body.lineUserId.trim()
-      : DEMO_LINE_USER_ID;
+  const lineUserId = normalizeLineUserId(
+    typeof body.lineUserId === "string" ? body.lineUserId : null,
+  );
+
+  if (!lineUserId) {
+    return NextResponse.json({ error: "Invalid lineUserId" }, { status: 400 });
+  }
+
+  if (
+    !hasLineUserDataAccess({
+      lineUserId,
+      accessToken: getRequestAccessToken(request),
+    })
+  ) {
+    return unauthorizedResponse();
+  }
 
   try {
     if (typeof body.text === "string") {

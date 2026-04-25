@@ -1,7 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { buildDashboardSummary } from "@/lib/analyze";
 import { categoryOrder } from "@/lib/categories";
+import { DEMO_LINE_USER_ID } from "@/lib/constants";
 import { getBangkokDateKey, toBangkokIso } from "@/lib/date";
 import { detectCategory } from "@/lib/parser";
+import {
+  MAX_EXPENSE_AMOUNT_BAHT,
+  MAX_EXPENSE_TITLE_LENGTH,
+  normalizeLineUserId,
+} from "@/lib/security";
 import {
   getSupabaseAdminClient,
   isSupabaseConfigured,
@@ -14,7 +21,7 @@ import type {
 } from "@/lib/types";
 import type { Database } from "@/types/database.types";
 
-export const DEMO_LINE_USER_ID = "demo-line-user";
+export { DEMO_LINE_USER_ID };
 
 type ExpenseInput = {
   lineUserId: string;
@@ -38,7 +45,10 @@ const globalForMoneyLeak = globalThis as typeof globalThis & {
 };
 
 export function getDefaultLineUserId() {
-  return process.env.DEFAULT_LINE_USER_ID?.trim() || DEMO_LINE_USER_ID;
+  return (
+    normalizeLineUserId(process.env.DEFAULT_LINE_USER_ID, DEMO_LINE_USER_ID) ??
+    DEMO_LINE_USER_ID
+  );
 }
 
 function shiftDateKey(todayKey: string, dayOffset: number) {
@@ -180,11 +190,11 @@ function listMemoryExpenses(lineUserId = DEMO_LINE_USER_ID) {
 
 function createMemoryExpense(input: ExpenseInput) {
   const expense: Expense = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     lineUserId: input.lineUserId,
     title: input.title.trim(),
     amountBaht: input.amountBaht,
-    category: input.category ?? detectCategory(input.title),
+    category: toExpenseCategory(input.category ?? detectCategory(input.title)),
     isNeed: input.isNeed ?? false,
     spentAt: input.spentAt ?? new Date().toISOString(),
     createdAt: new Date().toISOString(),
@@ -196,15 +206,27 @@ function createMemoryExpense(input: ExpenseInput) {
 }
 
 function validateExpenseInput(input: ExpenseInput) {
-  if (!input.lineUserId.trim()) {
+  const lineUserId = normalizeLineUserId(input.lineUserId, "");
+
+  if (!lineUserId) {
     throw new Error("Line user id is required");
   }
 
-  if (!input.title.trim()) {
+  const title = input.title.trim();
+
+  if (!title) {
     throw new Error("Expense title is required");
   }
 
-  if (!Number.isInteger(input.amountBaht) || input.amountBaht <= 0) {
+  if (title.length > MAX_EXPENSE_TITLE_LENGTH) {
+    throw new Error("Expense title is too long");
+  }
+
+  if (
+    !Number.isInteger(input.amountBaht) ||
+    input.amountBaht <= 0 ||
+    input.amountBaht > MAX_EXPENSE_AMOUNT_BAHT
+  ) {
     throw new Error("Expense amount must be a positive integer baht amount");
   }
 }
@@ -327,22 +349,23 @@ export async function createExpense(input: ExpenseInput) {
   const normalizedInput = {
     ...input,
     title: input.title.trim(),
-    category: input.category ?? detectCategory(input.title),
+    lineUserId: normalizeLineUserId(input.lineUserId, "") ?? input.lineUserId,
+    category: toExpenseCategory(input.category ?? detectCategory(input.title)),
   };
 
-  if (shouldUseMemory(input.lineUserId)) {
+  if (shouldUseMemory(normalizedInput.lineUserId)) {
     return createMemoryExpense(normalizedInput);
   }
 
   const supabase = getSupabaseAdminClient();
   if (!supabase) return createMemoryExpense(normalizedInput);
 
-  await ensureLineUser(input.lineUserId);
+  await ensureLineUser(normalizedInput.lineUserId);
 
   const { data, error } = await supabase
     .from("expenses")
     .insert({
-      line_user_id: input.lineUserId,
+      line_user_id: normalizedInput.lineUserId,
       title: normalizedInput.title,
       amount_baht: input.amountBaht,
       category: normalizedInput.category,

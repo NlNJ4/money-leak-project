@@ -19,12 +19,27 @@ import {
   parseDailyBudgetCommand,
   parseExpenseText,
 } from "@/lib/parser";
+import {
+  MAX_LINE_EVENTS,
+  MAX_LINE_TEXT_LENGTH,
+  MAX_LINE_WEBHOOK_BODY_BYTES,
+  RequestBodyTooLargeError,
+  appendDashboardAccessToken,
+  isRateLimited,
+  normalizeLineUserId,
+  readRequestTextWithLimit,
+} from "@/lib/security";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+const lineMessageRateLimit = {
+  limit: 30,
+  windowMs: 60_000,
+};
+
 function getLineUserId(event: LineWebhookEvent) {
-  return event.source?.userId ?? null;
+  return normalizeLineUserId(event.source?.userId, "") || null;
 }
 
 function getDashboardUrl(lineUserId: string) {
@@ -34,6 +49,7 @@ function getDashboardUrl(lineUserId: string) {
 
   const url = new URL("/dashboard", appUrl);
   url.searchParams.set("lineUserId", lineUserId);
+  appendDashboardAccessToken(url, lineUserId);
 
   return url.toString();
 }
@@ -207,7 +223,34 @@ async function handleLineEvent(event: LineWebhookEvent) {
     return;
   }
 
-  await replyText(event.replyToken, await handleLineText(lineUserId, text));
+  if (text.length > MAX_LINE_TEXT_LENGTH) {
+    await replyText(
+      event.replyToken,
+      "ข้อความยาวเกินไป กรุณาส่งรายการให้สั้นลง เช่น ข้าว 55",
+    );
+    return;
+  }
+
+  if (isRateLimited(`line:${lineUserId}`, lineMessageRateLimit)) {
+    await replyText(
+      event.replyToken,
+      "ส่งเร็วเกินไป กรุณารอสักครู่แล้วลองใหม่",
+    );
+    return;
+  }
+
+  try {
+    await replyText(event.replyToken, await handleLineText(lineUserId, text));
+  } catch (error) {
+    console.error("LINE event processing failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+
+    await replyText(
+      event.replyToken,
+      "ยังบันทึกรายการไม่ได้ กรุณาลองใหม่อีกครั้ง",
+    );
+  }
 }
 
 export async function POST(request: Request) {
@@ -220,8 +263,41 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = await request.text();
+  if (
+    !request.headers
+      .get("content-type")
+      ?.toLowerCase()
+      .includes("application/json")
+  ) {
+    return NextResponse.json(
+      { error: "Content-Type must be application/json" },
+      { status: 415 },
+    );
+  }
+
+  let body: string;
+
+  try {
+    body = await readRequestTextWithLimit(
+      request,
+      MAX_LINE_WEBHOOK_BODY_BYTES,
+    );
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return NextResponse.json(
+        { error: "Webhook payload is too large" },
+        { status: 413 },
+      );
+    }
+
+    throw error;
+  }
+
   const signature = request.headers.get("x-line-signature") ?? "";
+
+  if (!signature) {
+    return NextResponse.json({ error: "Missing signature" }, { status: 401 });
+  }
 
   if (!verifyLineSignature(body, signature, channelSecret)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
@@ -235,8 +311,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
   }
 
+  const events = Array.isArray(payload.events) ? payload.events : [];
+
+  if (events.length > MAX_LINE_EVENTS) {
+    return NextResponse.json(
+      { error: "Webhook payload contains too many events" },
+      { status: 413 },
+    );
+  }
+
   try {
-    await Promise.all((payload.events ?? []).map(handleLineEvent));
+    await Promise.all(events.map(handleLineEvent));
   } catch {
     return NextResponse.json(
       { error: "Unable to process LINE webhook" },
