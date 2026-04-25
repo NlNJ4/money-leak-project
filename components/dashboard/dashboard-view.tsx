@@ -41,6 +41,10 @@ export function DashboardView({
 }) {
   const hasOverDailyBudget = summary.dailyRemainingBaht < 0;
   const hasOverMonthlyBudget = summary.monthlyRemainingBaht < 0;
+  const weeklyBudgetTargetBaht = summary.dailyBudgetBaht * 7;
+  const weeklyDetail = summary.weekTopCategory
+    ? `เฉลี่ยวันละ ${formatBaht(summary.weekAverageBaht)} | สูงสุด ${summary.weekTopCategory.label}`
+    : "ยังไม่มีรายการใน 7 วันล่าสุด";
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[linear-gradient(180deg,#eefaf4_0,#f6f7f9_22rem,#f6f7f9_100%)] text-zinc-950">
@@ -70,7 +74,7 @@ export function DashboardView({
           </div>
         </header>
 
-        <section className="grid gap-3 min-[520px]:grid-cols-2 sm:gap-4 xl:grid-cols-4">
+        <section className="grid gap-3 min-[520px]:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-5">
           <MetricCard
             label="ใช้วันนี้"
             value={formatBaht(summary.todayTotalBaht)}
@@ -82,6 +86,18 @@ export function DashboardView({
             value={formatBaht(summary.monthTotalBaht)}
             detail={`งบเดือนนี้ ${formatBaht(summary.monthlyBudgetBaht)}`}
             tone={getBudgetTone(summary.monthlyRemainingBaht)}
+          />
+          <MetricCard
+            label="7 วันล่าสุด"
+            value={formatBaht(summary.weekTotalBaht)}
+            detail={weeklyDetail}
+            tone={
+              summary.weekTotalBaht === 0
+                ? "neutral"
+                : summary.weekTotalBaht > weeklyBudgetTargetBaht
+                  ? "warning"
+                  : "info"
+            }
           />
           <MetricCard
             label="คาดการณ์สิ้นเดือน"

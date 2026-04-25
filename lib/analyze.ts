@@ -31,7 +31,7 @@ function isSameBangkokMonth(expense: Expense, monthKey: string) {
   return getBangkokDateKey(new Date(expense.spentAt)).startsWith(monthKey);
 }
 
-function getCategoryTotals(expenses: Expense[], monthTotalBaht: number) {
+function getCategoryTotals(expenses: Expense[], totalBahtForPercent: number) {
   return categoryOrder
     .map<CategoryTotal>((category) => {
       const categoryExpenses = expenses.filter(
@@ -45,7 +45,9 @@ function getCategoryTotals(expenses: Expense[], monthTotalBaht: number) {
         totalBaht,
         count: categoryExpenses.length,
         percentage:
-          monthTotalBaht > 0 ? (totalBaht / monthTotalBaht) * 100 : 0,
+          totalBahtForPercent > 0
+            ? (totalBaht / totalBahtForPercent) * 100
+            : 0,
         color: categoryConfig[category].color,
       };
     })
@@ -53,8 +55,8 @@ function getCategoryTotals(expenses: Expense[], monthTotalBaht: number) {
     .sort((a, b) => b.totalBaht - a.totalBaht);
 }
 
-function buildTrend(expenses: Expense[], now: Date) {
-  return getRecentBangkokDateKeys(7, now).map((dateKey) => {
+function buildTrend(expenses: Expense[], dateKeys: string[]) {
+  return dateKeys.map((dateKey) => {
     const totalBaht = sumExpenses(
       expenses.filter((expense) => isSameBangkokDay(expense, dateKey)),
     );
@@ -187,9 +189,16 @@ export function buildDashboardSummary({
   const monthExpenses = expenses.filter((expense) =>
     isSameBangkokMonth(expense, monthKey),
   );
+  const weekDateKeys = getRecentBangkokDateKeys(7, now);
+  const weekDateKeySet = new Set(weekDateKeys);
+  const weekExpenses = expenses.filter((expense) =>
+    weekDateKeySet.has(getBangkokDateKey(new Date(expense.spentAt))),
+  );
   const todayTotalBaht = sumExpenses(todayExpenses);
   const monthTotalBaht = sumExpenses(monthExpenses);
+  const weekTotalBaht = sumExpenses(weekExpenses);
   const categoryTotals = getCategoryTotals(monthExpenses, monthTotalBaht);
+  const weekCategoryTotals = getCategoryTotals(weekExpenses, weekTotalBaht);
   const leakInsights = getLeakInsights(categoryTotals, monthTotalBaht);
   const recentExpenses = [...expenses]
     .sort(
@@ -203,6 +212,9 @@ export function buildDashboardSummary({
     asOf: now.toISOString(),
     todayTotalBaht,
     monthTotalBaht,
+    weekTotalBaht,
+    weekAverageBaht: Math.round(weekTotalBaht / weekDateKeys.length),
+    weekTopCategory: weekCategoryTotals[0] ?? null,
     dailyBudgetBaht: budget.dailyBudgetBaht,
     monthlyBudgetBaht: budget.monthlyBudgetBaht,
     dailyRemainingBaht: budget.dailyBudgetBaht - todayTotalBaht,
@@ -220,7 +232,7 @@ export function buildDashboardSummary({
       now,
     ),
     categoryTotals,
-    dailyTrend: buildTrend(expenses, now),
+    dailyTrend: buildTrend(expenses, weekDateKeys),
     leakInsights,
     recentExpenses,
   };

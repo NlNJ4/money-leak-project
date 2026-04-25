@@ -65,6 +65,7 @@ Supported LINE commands:
 
 - `ข้าว 55` or `milk tea 45` records an expense.
 - `สรุปวันนี้` or `today` returns today's summary.
+- `สรุปสัปดาห์นี้` or `week` returns the latest 7-day summary.
 - `สรุปเดือนนี้` or `month` returns this month's summary.
 - `ตั้งงบ 200` sets the daily budget.
 - `ตั้งงบเดือน 6000` sets the monthly budget.
@@ -104,5 +105,6 @@ taskkill /PID <PID> /F
 ## Dashboard Features
 
 - Edit or delete recent expenses from the dashboard.
+- Review the latest 7-day total, daily average, and top spending category.
 - Update daily and monthly budgets from the budget section.
 - Dashboard mutations call scoped API routes and refresh server-rendered summaries after saving.

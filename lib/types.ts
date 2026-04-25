@@ -59,6 +59,9 @@ export type DashboardSummary = {
   asOf: string;
   todayTotalBaht: number;
   monthTotalBaht: number;
+  weekTotalBaht: number;
+  weekAverageBaht: number;
+  weekTopCategory: CategoryTotal | null;
   dailyBudgetBaht: number;
   monthlyBudgetBaht: number;
   dailyRemainingBaht: number;

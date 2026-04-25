@@ -80,6 +80,27 @@ async function buildMonthlySummaryReply(lineUserId: string) {
   ].join("\n");
 }
 
+async function buildWeeklySummaryReply(lineUserId: string) {
+  const summary = await getDashboardSummary(lineUserId);
+  const topCategory = summary.weekTopCategory;
+  const topLeak = summary.leakInsights[0];
+
+  if (summary.weekTotalBaht === 0) {
+    return "7 วันล่าสุดยังไม่มีรายการ ลองส่งเช่น ข้าว 55";
+  }
+
+  return [
+    `7 วันล่าสุดใช้ไป ${formatBaht(summary.weekTotalBaht)}`,
+    `เฉลี่ยวันละ ${formatBaht(summary.weekAverageBaht)}`,
+    topCategory
+      ? `หมวดสูงสุด: ${topCategory.label} ${formatBaht(topCategory.totalBaht)}`
+      : null,
+    topLeak ? `เงินรั่วที่ควรดู: ${topLeak.label} - ${topLeak.suggestion}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function buildSavedExpenseReply(
   lineUserId: string,
   expense: ParsedExpenseText & { isNeed?: boolean },
@@ -123,6 +144,9 @@ async function handleGeminiIntent(
 
     case "summary_today":
       return buildDailySummaryReply(lineUserId);
+
+    case "summary_week":
+      return buildWeeklySummaryReply(lineUserId);
 
     case "summary_month":
       return buildMonthlySummaryReply(lineUserId);
@@ -176,6 +200,14 @@ async function handleLineText(
 
   if (["สรุปวันนี้", "today", "summary today"].includes(normalized)) {
     return buildDailySummaryReply(lineUserId);
+  }
+
+  if (
+    ["สรุปสัปดาห์นี้", "สัปดาห์นี้", "week", "summary week"].includes(
+      normalized,
+    )
+  ) {
+    return buildWeeklySummaryReply(lineUserId);
   }
 
   if (["สรุปเดือนนี้", "month", "summary month"].includes(normalized)) {
