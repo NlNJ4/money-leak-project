@@ -3,6 +3,7 @@ import { DEMO_LINE_USER_ID } from "@/lib/constants";
 
 export const MAX_EXPENSE_AMOUNT_BAHT = 1_000_000;
 export const MAX_EXPENSE_TITLE_LENGTH = 100;
+export const MAX_BUDGET_AMOUNT_BAHT = 10_000_000;
 export const MAX_JSON_BODY_BYTES = 16 * 1024;
 export const MAX_LINE_EVENTS = 20;
 export const MAX_LINE_TEXT_LENGTH = 500;

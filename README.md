@@ -61,6 +61,15 @@ https://your-domain.example/api/line/webhook
 4. Set `LINE_CHANNEL_SECRET` and `LINE_CHANNEL_ACCESS_TOKEN` in `.env.local` or Vercel environment variables.
 5. Send `id` or `dashboard` to the bot to get your LINE user id and private dashboard link.
 
+Supported LINE commands:
+
+- `ข้าว 55` or `milk tea 45` records an expense.
+- `สรุปวันนี้` or `today` returns today's summary.
+- `สรุปเดือนนี้` or `month` returns this month's summary.
+- `ตั้งงบ 200` sets the daily budget.
+- `ตั้งงบเดือน 6000` sets the monthly budget.
+- `dashboard` returns a private dashboard link.
+
 For local webhook testing, use an HTTPS tunnel such as ngrok:
 
 ```bash
@@ -91,3 +100,9 @@ taskkill /PID <PID> /F
 - Dashboard and private API responses are marked `no-store`.
 - LINE expense retries are deduplicated with `line_webhook_event_id`.
 - Real production identity should eventually move to LIFF or another authenticated session flow.
+
+## Dashboard Features
+
+- Edit or delete recent expenses from the dashboard.
+- Update daily and monthly budgets from the budget section.
+- Dashboard mutations call scoped API routes and refresh server-rendered summaries after saving.

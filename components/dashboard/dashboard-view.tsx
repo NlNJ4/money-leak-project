@@ -1,4 +1,5 @@
 import { BudgetProgress } from "@/components/dashboard/budget-progress";
+import { BudgetSettings } from "@/components/dashboard/budget-settings";
 import { CategoryBarList } from "@/components/dashboard/category-bar-list";
 import { DailyTrend } from "@/components/dashboard/daily-trend";
 import { ExpenseList } from "@/components/dashboard/expense-list";
@@ -31,7 +32,13 @@ function formatAsOf(isoDate: string) {
   }).format(new Date(isoDate));
 }
 
-export function DashboardView({ summary }: { summary: DashboardSummary }) {
+export function DashboardView({
+  summary,
+  accessToken,
+}: {
+  summary: DashboardSummary;
+  accessToken?: string | null;
+}) {
   const hasOverDailyBudget = summary.dailyRemainingBaht < 0;
   const hasOverMonthlyBudget = summary.monthlyRemainingBaht < 0;
 
@@ -105,6 +112,12 @@ export function DashboardView({ summary }: { summary: DashboardSummary }) {
         <section className="grid gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
           <div className="grid gap-4 sm:gap-6">
             <SectionPanel title="งบที่ใช้ไป">
+              <BudgetSettings
+                accessToken={accessToken}
+                dailyBudgetBaht={summary.dailyBudgetBaht}
+                lineUserId={summary.lineUserId}
+                monthlyBudgetBaht={summary.monthlyBudgetBaht}
+              />
               <div className="grid gap-5 md:grid-cols-2">
                 <BudgetProgress
                   label="งบรายวัน"
@@ -134,7 +147,11 @@ export function DashboardView({ summary }: { summary: DashboardSummary }) {
               <LeakInsightList insights={summary.leakInsights} />
             </SectionPanel>
             <SectionPanel title="รายการล่าสุด">
-              <ExpenseList expenses={summary.recentExpenses} />
+              <ExpenseList
+                accessToken={accessToken}
+                expenses={summary.recentExpenses}
+                lineUserId={summary.lineUserId}
+              />
             </SectionPanel>
           </div>
         </section>

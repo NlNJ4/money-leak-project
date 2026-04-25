@@ -12,6 +12,7 @@ import {
 } from "@/lib/date";
 import { detectCategory } from "@/lib/parser";
 import {
+  MAX_BUDGET_AMOUNT_BAHT,
   MAX_EXPENSE_AMOUNT_BAHT,
   MAX_EXPENSE_TITLE_LENGTH,
   normalizeLineUserId,
@@ -40,6 +41,18 @@ type ExpenseInput = {
   spentAt?: string;
 };
 
+type ExpenseUpdateInput = {
+  title: string;
+  amountBaht: number;
+  category?: ExpenseCategory;
+  isNeed?: boolean;
+};
+
+type BudgetUpdateInput = {
+  dailyBudgetBaht?: number;
+  monthlyBudgetBaht?: number;
+};
+
 type MoneyLeakStore = {
   expenses: Expense[];
   budgets: Map<string, UserBudget>;
@@ -47,6 +60,7 @@ type MoneyLeakStore = {
 
 type ExpenseRow = Database["public"]["Tables"]["expenses"]["Row"];
 type LineUserRow = Database["public"]["Tables"]["line_users"]["Row"];
+type LineUserUpdate = Database["public"]["Tables"]["line_users"]["Update"];
 
 const globalForMoneyLeak = globalThis as typeof globalThis & {
   __moneyLeakStore?: MoneyLeakStore;
@@ -182,12 +196,12 @@ function getMemoryBudget(lineUserId = DEMO_LINE_USER_ID): UserBudget {
   return budget;
 }
 
-function updateMemoryDailyBudget(lineUserId: string, dailyBudgetBaht: number) {
+function updateMemoryBudget(lineUserId: string, input: BudgetUpdateInput) {
   const store = getStore();
   const currentBudget = getMemoryBudget(lineUserId);
   const nextBudget = {
     ...currentBudget,
-    dailyBudgetBaht,
+    ...input,
   };
 
   store.budgets.set(lineUserId, nextBudget);
@@ -243,6 +257,45 @@ function createMemoryExpense(input: ExpenseInput) {
   return expense;
 }
 
+function updateMemoryExpense(
+  lineUserId: string,
+  expenseId: string,
+  input: ExpenseUpdateInput,
+) {
+  const store = getStore();
+  const expenseIndex = store.expenses.findIndex(
+    (expense) => expense.lineUserId === lineUserId && expense.id === expenseId,
+  );
+
+  if (expenseIndex === -1) {
+    throw new Error("Expense not found");
+  }
+
+  const currentExpense = store.expenses[expenseIndex];
+  const nextExpense = {
+    ...currentExpense,
+    title: input.title.trim(),
+    amountBaht: input.amountBaht,
+    category: toExpenseCategory(input.category ?? detectCategory(input.title)),
+    isNeed: input.isNeed ?? currentExpense.isNeed,
+  };
+
+  store.expenses[expenseIndex] = nextExpense;
+
+  return nextExpense;
+}
+
+function deleteMemoryExpense(lineUserId: string, expenseId: string) {
+  const store = getStore();
+  const beforeCount = store.expenses.length;
+
+  store.expenses = store.expenses.filter(
+    (expense) => expense.lineUserId !== lineUserId || expense.id !== expenseId,
+  );
+
+  return store.expenses.length < beforeCount;
+}
+
 function normalizeLineWebhookEventId(value: string | null | undefined) {
   if (typeof value !== "string") return null;
 
@@ -259,6 +312,16 @@ function normalizeExpenseQueryLimit(value: number) {
   if (!Number.isFinite(value)) return DEFAULT_EXPENSE_QUERY_LIMIT;
 
   return Math.min(Math.max(Math.trunc(value), 1), MAX_EXPENSE_QUERY_LIMIT);
+}
+
+function validateBudgetAmount(value: number, label: string) {
+  if (
+    !Number.isInteger(value) ||
+    value <= 0 ||
+    value > MAX_BUDGET_AMOUNT_BAHT
+  ) {
+    throw new Error(`${label} must be a positive integer baht amount`);
+  }
 }
 
 function validateExpenseInput(input: ExpenseInput) {
@@ -285,6 +348,16 @@ function validateExpenseInput(input: ExpenseInput) {
   ) {
     throw new Error("Expense amount must be a positive integer baht amount");
   }
+}
+
+function validateExpenseUpdateInput(input: ExpenseUpdateInput) {
+  validateExpenseInput({
+    lineUserId: DEMO_LINE_USER_ID,
+    title: input.title,
+    amountBaht: input.amountBaht,
+    category: input.category,
+    isNeed: input.isNeed,
+  });
 }
 
 async function getExpenseByLineWebhookEventId(
@@ -367,26 +440,63 @@ export async function updateDailyBudget(
   lineUserId: string,
   dailyBudgetBaht: number,
 ) {
-  if (!Number.isInteger(dailyBudgetBaht) || dailyBudgetBaht <= 0) {
-    throw new Error("Daily budget must be a positive integer baht amount");
+  return updateBudget(lineUserId, { dailyBudgetBaht });
+}
+
+export async function updateMonthlyBudget(
+  lineUserId: string,
+  monthlyBudgetBaht: number,
+) {
+  return updateBudget(lineUserId, { monthlyBudgetBaht });
+}
+
+export async function updateBudget(lineUserId: string, input: BudgetUpdateInput) {
+  const normalizedLineUserId = normalizeLineUserId(lineUserId, "");
+
+  if (!normalizedLineUserId) {
+    throw new Error("Line user id is required");
   }
 
-  if (shouldUseMemory(lineUserId)) {
-    return updateMemoryDailyBudget(lineUserId, dailyBudgetBaht);
+  if (
+    input.dailyBudgetBaht === undefined &&
+    input.monthlyBudgetBaht === undefined
+  ) {
+    throw new Error("At least one budget value is required");
+  }
+
+  if (input.dailyBudgetBaht !== undefined) {
+    validateBudgetAmount(input.dailyBudgetBaht, "Daily budget");
+  }
+
+  if (input.monthlyBudgetBaht !== undefined) {
+    validateBudgetAmount(input.monthlyBudgetBaht, "Monthly budget");
+  }
+
+  if (shouldUseMemory(normalizedLineUserId)) {
+    return updateMemoryBudget(normalizedLineUserId, input);
   }
 
   const supabase = getSupabaseAdminClient();
-  if (!supabase) return updateMemoryDailyBudget(lineUserId, dailyBudgetBaht);
+  if (!supabase) return updateMemoryBudget(normalizedLineUserId, input);
 
-  await ensureLineUser(lineUserId);
+  await ensureLineUser(normalizedLineUserId);
+
+  const updateValues: LineUserUpdate = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.dailyBudgetBaht !== undefined) {
+    updateValues.daily_budget_baht = input.dailyBudgetBaht;
+  }
+
+  if (input.monthlyBudgetBaht !== undefined) {
+    updateValues.monthly_budget_baht = input.monthlyBudgetBaht;
+  }
 
   const { data, error } = await supabase
     .from("line_users")
-    .update({
-      daily_budget_baht: dailyBudgetBaht,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("line_user_id", lineUserId)
+    .update(updateValues)
+    .eq("line_user_id", normalizedLineUserId)
     .select("*")
     .single();
 
@@ -504,6 +614,119 @@ export async function createExpense(input: ExpenseInput) {
   }
 
   return mapExpense(data);
+}
+
+export async function updateExpense(
+  lineUserId: string,
+  expenseId: string,
+  input: ExpenseUpdateInput,
+) {
+  const normalizedLineUserId = normalizeLineUserId(lineUserId, "");
+
+  if (!normalizedLineUserId) {
+    throw new Error("Line user id is required");
+  }
+
+  const normalizedExpenseId = expenseId.trim();
+
+  if (!normalizedExpenseId) {
+    throw new Error("Expense id is required");
+  }
+
+  validateExpenseUpdateInput(input);
+
+  const normalizedInput = {
+    ...input,
+    title: input.title.trim(),
+    category: toExpenseCategory(input.category ?? detectCategory(input.title)),
+  };
+
+  if (shouldUseMemory(normalizedLineUserId)) {
+    return updateMemoryExpense(
+      normalizedLineUserId,
+      normalizedExpenseId,
+      normalizedInput,
+    );
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return updateMemoryExpense(
+      normalizedLineUserId,
+      normalizedExpenseId,
+      normalizedInput,
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("expenses")
+    .update({
+      title: normalizedInput.title,
+      amount_baht: normalizedInput.amountBaht,
+      category: normalizedInput.category,
+      is_need: normalizedInput.isNeed ?? false,
+    })
+    .eq("line_user_id", normalizedLineUserId)
+    .eq("id", normalizedExpenseId)
+    .select("*")
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error("Supabase expenses update failed", {
+      code: error?.code,
+      message: error?.message,
+    });
+    throw new Error("Unable to update expense");
+  }
+
+  return mapExpense(data);
+}
+
+export async function deleteExpense(lineUserId: string, expenseId: string) {
+  const normalizedLineUserId = normalizeLineUserId(lineUserId, "");
+
+  if (!normalizedLineUserId) {
+    throw new Error("Line user id is required");
+  }
+
+  const normalizedExpenseId = expenseId.trim();
+
+  if (!normalizedExpenseId) {
+    throw new Error("Expense id is required");
+  }
+
+  if (shouldUseMemory(normalizedLineUserId)) {
+    if (!deleteMemoryExpense(normalizedLineUserId, normalizedExpenseId)) {
+      throw new Error("Expense not found");
+    }
+
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    if (!deleteMemoryExpense(normalizedLineUserId, normalizedExpenseId)) {
+      throw new Error("Expense not found");
+    }
+
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("expenses")
+    .delete()
+    .eq("line_user_id", normalizedLineUserId)
+    .eq("id", normalizedExpenseId)
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error("Supabase expenses delete failed", {
+      code: error?.code,
+      message: error?.message,
+    });
+    throw new Error("Unable to delete expense");
+  }
 }
 
 export async function getDashboardSummary(

@@ -31,5 +31,5 @@ export default async function Home({
 
   const summary = await getDashboardSummary(lineUserId);
 
-  return <DashboardView summary={summary} />;
+  return <DashboardView accessToken={accessToken} summary={summary} />;
 }

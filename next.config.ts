@@ -100,6 +100,10 @@ const nextConfig: NextConfig = {
         headers: privateNoStoreHeaders,
       },
       {
+        source: "/api/budget",
+        headers: privateNoStoreHeaders,
+      },
+      {
         source: "/api/line/webhook",
         headers: privateNoStoreHeaders,
       },

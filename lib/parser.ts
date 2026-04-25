@@ -45,7 +45,7 @@ export function parseExpenseText(text: string): ParsedExpenseText | null {
 export function parseDailyBudgetCommand(text: string) {
   const match = text
     .trim()
-    .match(/^(?:ตั้งงบ|budget)\s+(\d+)(?:\s*(?:บาท|฿))?$/iu);
+    .match(/^(?:ตั้งงบ|ตั้งงบวัน|budget|daily budget)\s+(\d+)(?:\s*(?:บาท|฿))?$/iu);
 
   if (!match) return null;
 
@@ -54,4 +54,20 @@ export function parseDailyBudgetCommand(text: string) {
   if (!Number.isInteger(dailyBudgetBaht) || dailyBudgetBaht <= 0) return null;
 
   return { dailyBudgetBaht };
+}
+
+export function parseMonthlyBudgetCommand(text: string) {
+  const match = text
+    .trim()
+    .match(/^(?:ตั้งงบเดือน|budget month|month budget|monthly budget)\s+(\d+)(?:\s*(?:บาท|฿))?$/iu);
+
+  if (!match) return null;
+
+  const monthlyBudgetBaht = Number(match[1]);
+
+  if (!Number.isInteger(monthlyBudgetBaht) || monthlyBudgetBaht <= 0) {
+    return null;
+  }
+
+  return { monthlyBudgetBaht };
 }

@@ -2,6 +2,7 @@ import {
   createExpense,
   getDashboardSummary,
   updateDailyBudget,
+  updateMonthlyBudget,
 } from "@/lib/expense-service";
 import { formatBaht } from "@/lib/format";
 import {
@@ -18,6 +19,7 @@ import {
   type ParsedExpenseText,
   parseDailyBudgetCommand,
   parseExpenseText,
+  parseMonthlyBudgetCommand,
 } from "@/lib/parser";
 import {
   MAX_LINE_EVENTS,
@@ -114,6 +116,11 @@ async function handleGeminiIntent(
 
       return `ตั้งงบรายวันแล้ว: ${formatBaht(intent.dailyBudgetBaht)}`;
 
+    case "monthly_budget":
+      await updateMonthlyBudget(lineUserId, intent.monthlyBudgetBaht);
+
+      return `ตั้งงบรายเดือนแล้ว: ${formatBaht(intent.monthlyBudgetBaht)}`;
+
     case "summary_today":
       return buildDailySummaryReply(lineUserId);
 
@@ -189,6 +196,17 @@ async function handleLineText(
     await updateDailyBudget(lineUserId, budgetCommand.dailyBudgetBaht);
 
     return `ตั้งงบรายวันแล้ว: ${formatBaht(budgetCommand.dailyBudgetBaht)}`;
+  }
+
+  const monthlyBudgetCommand = parseMonthlyBudgetCommand(text);
+
+  if (monthlyBudgetCommand) {
+    await updateMonthlyBudget(
+      lineUserId,
+      monthlyBudgetCommand.monthlyBudgetBaht,
+    );
+
+    return `ตั้งงบรายเดือนแล้ว: ${formatBaht(monthlyBudgetCommand.monthlyBudgetBaht)}`;
   }
 
   const geminiReply = await handleGeminiIntent(

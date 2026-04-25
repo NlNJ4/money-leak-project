@@ -9,6 +9,7 @@ const MIN_CONFIDENCE = 0.55;
 const intentActions = [
   "expense",
   "budget",
+  "monthly_budget",
   "summary_today",
   "summary_month",
   "dashboard",
@@ -25,6 +26,7 @@ type RawGeminiIntent = {
   category?: unknown;
   isNeed?: unknown;
   dailyBudgetBaht?: unknown;
+  monthlyBudgetBaht?: unknown;
   needsClarification?: unknown;
   clarificationQuestion?: unknown;
   confidence?: unknown;
@@ -52,6 +54,11 @@ export type GeminiLineIntent =
   | {
       action: "budget";
       dailyBudgetBaht: number;
+      confidence: number;
+    }
+  | {
+      action: "monthly_budget";
+      monthlyBudgetBaht: number;
       confidence: number;
     }
   | {
@@ -103,6 +110,11 @@ const responseJsonSchema = {
       description:
         "Positive integer daily budget in baht when the action is budget. Null otherwise.",
     },
+    monthlyBudgetBaht: {
+      type: ["integer", "null"],
+      description:
+        "Positive integer monthly budget in baht when the action is monthly_budget. Null otherwise.",
+    },
     needsClarification: {
       type: "boolean",
       description:
@@ -127,6 +139,7 @@ const responseJsonSchema = {
     "category",
     "isNeed",
     "dailyBudgetBaht",
+    "monthlyBudgetBaht",
     "needsClarification",
     "clarificationQuestion",
     "confidence",
@@ -158,7 +171,7 @@ function buildPrompt(text: string) {
     "- shopping: snacks, Shopee, Lazada, small items, general shopping",
     "- subscriptions: Netflix, Spotify, YouTube, recurring memberships",
     "- other: clear expenses that do not fit the other categories",
-    "Recognize commands for today/month summaries, dashboard link, identity, and daily budget setting.",
+    "Recognize commands for today/month summaries, dashboard link, identity, daily budget setting, and monthly budget setting.",
     `User message as JSON string: ${JSON.stringify(text.trim().slice(0, 500))}`,
   ].join("\n");
 }
@@ -270,6 +283,28 @@ function normalizeIntent(rawIntent: RawGeminiIntent): GeminiLineIntent {
     return {
       action: "budget",
       dailyBudgetBaht,
+      confidence,
+    };
+  }
+
+  if (action === "monthly_budget") {
+    const monthlyBudgetBaht = toPositiveInteger(rawIntent.monthlyBudgetBaht);
+
+    if (!monthlyBudgetBaht || confidence < MIN_CONFIDENCE) {
+      return {
+        action: "clarify",
+        clarificationQuestion:
+          typeof rawIntent.clarificationQuestion === "string" &&
+          rawIntent.clarificationQuestion.trim()
+            ? rawIntent.clarificationQuestion.trim()
+            : "ต้องการตั้งงบรายเดือนเท่าไหร่? เช่น ตั้งงบเดือน 6000",
+        confidence,
+      };
+    }
+
+    return {
+      action: "monthly_budget",
+      monthlyBudgetBaht,
       confidence,
     };
   }
