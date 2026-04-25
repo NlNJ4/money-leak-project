@@ -81,9 +81,11 @@ async function buildMonthlySummaryReply(lineUserId: string) {
 async function buildSavedExpenseReply(
   lineUserId: string,
   expense: ParsedExpenseText & { isNeed?: boolean },
+  lineWebhookEventId?: string | null,
 ) {
   await createExpense({
     lineUserId,
+    lineWebhookEventId,
     title: expense.title,
     amountBaht: expense.amountBaht,
     category: expense.category,
@@ -99,12 +101,13 @@ async function buildSavedExpenseReply(
 async function handleGeminiIntent(
   lineUserId: string,
   intent: GeminiLineIntent | null,
+  lineWebhookEventId?: string | null,
 ) {
   if (!intent) return null;
 
   switch (intent.action) {
     case "expense":
-      return buildSavedExpenseReply(lineUserId, intent);
+      return buildSavedExpenseReply(lineUserId, intent, lineWebhookEventId);
 
     case "budget":
       await updateDailyBudget(lineUserId, intent.dailyBudgetBaht);
@@ -144,7 +147,11 @@ async function handleGeminiIntent(
   }
 }
 
-async function handleLineText(lineUserId: string, text: string) {
+async function handleLineText(
+  lineUserId: string,
+  text: string,
+  lineWebhookEventId?: string | null,
+) {
   const normalized = text.trim().toLowerCase();
 
   if (
@@ -187,6 +194,7 @@ async function handleLineText(lineUserId: string, text: string) {
   const geminiReply = await handleGeminiIntent(
     lineUserId,
     await parseLineIntentWithGemini(text),
+    lineWebhookEventId,
   );
 
   if (geminiReply) return geminiReply;
@@ -197,7 +205,7 @@ async function handleLineText(lineUserId: string, text: string) {
     return "พิมพ์รายการกับจำนวนเงิน เช่น ข้าว 55 หรือพิมพ์ สรุปวันนี้";
   }
 
-  return buildSavedExpenseReply(lineUserId, parsed);
+  return buildSavedExpenseReply(lineUserId, parsed, lineWebhookEventId);
 }
 
 async function replyText(replyToken: string, text: string) {
@@ -255,7 +263,7 @@ async function handleLineEvent(event: LineWebhookEvent) {
   try {
     await safeReplyText(
       event.replyToken,
-      await handleLineText(lineUserId, text),
+      await handleLineText(lineUserId, text, event.webhookEventId),
     );
   } catch (error) {
     console.error("LINE event processing failed", {

@@ -50,6 +50,14 @@ export function getBangkokCalendarContext(now = new Date()) {
   };
 }
 
+export function getBangkokDayStartIso(dateKey: string) {
+  return toBangkokIso(dateKey, 0, 0);
+}
+
+export function getBangkokMonthStartIso(monthKey: string) {
+  return getBangkokDayStartIso(`${monthKey}-01`);
+}
+
 export function toBangkokIso(dateKey: string, hour = 9, minute = 0) {
   const { year, month, day } = parseDateKey(dateKey);
 

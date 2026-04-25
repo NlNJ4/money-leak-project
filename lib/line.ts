@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export type LineTextMessageEvent = {
   type: "message";
+  webhookEventId?: string;
   replyToken: string;
   source: {
     userId?: string;
@@ -18,6 +19,7 @@ export type LineWebhookEvent =
   | LineTextMessageEvent
   | {
       type: string;
+      webhookEventId?: string;
       replyToken?: string;
       source?: {
         userId?: string;

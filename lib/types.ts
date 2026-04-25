@@ -10,6 +10,7 @@ export type ExpenseCategory =
 export type Expense = {
   id: string;
   lineUserId: string;
+  lineWebhookEventId: string | null;
   title: string;
   amountBaht: number;
   category: ExpenseCategory;

@@ -12,7 +12,8 @@ const MAX_RATE_LIMIT_KEYS = 5_000;
 const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60_000;
 const LINE_USER_ID_PATTERN = /^U[a-f0-9]{32}$/i;
 const DASHBOARD_ACCESS_TOKEN_PARAM = "accessToken";
-const DASHBOARD_TOKEN_VERSION = "v1";
+const DASHBOARD_TOKEN_VERSION = "v2";
+const DASHBOARD_ACCESS_TOKEN_DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 type RateLimitEntry = {
   count: number;
@@ -51,6 +52,16 @@ export function normalizeLineUserId(
 
 export function getDashboardAccessSecret() {
   return process.env.DASHBOARD_ACCESS_TOKEN?.trim() || null;
+}
+
+function getDashboardAccessTokenTtlSeconds() {
+  const value = Number(process.env.DASHBOARD_ACCESS_TOKEN_TTL_SECONDS);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return DASHBOARD_ACCESS_TOKEN_DEFAULT_TTL_SECONDS;
+  }
+
+  return Math.min(Math.trunc(value), DASHBOARD_ACCESS_TOKEN_DEFAULT_TTL_SECONDS);
 }
 
 export function getSingleSearchParam(value: SearchParamValue) {
@@ -103,11 +114,14 @@ export function createDashboardAccessToken(lineUserId: string) {
 
   if (!secret || !isValidLineUserId(lineUserId)) return null;
 
+  const expiresAt =
+    Math.floor(Date.now() / 1000) + getDashboardAccessTokenTtlSeconds();
+  const payload = `${DASHBOARD_TOKEN_VERSION}:${lineUserId}:${expiresAt}`;
   const signature = createHmac("sha256", secret)
-    .update(`${DASHBOARD_TOKEN_VERSION}:${lineUserId}`)
+    .update(payload)
     .digest("base64url");
 
-  return `${DASHBOARD_TOKEN_VERSION}.${signature}`;
+  return `${DASHBOARD_TOKEN_VERSION}.${expiresAt}.${signature}`;
 }
 
 export function appendDashboardAccessToken(url: URL, lineUserId: string) {
@@ -135,11 +149,7 @@ export function hasLineUserDataAccess({
 
   if (!accessToken) return false;
 
-  const expectedToken = createDashboardAccessToken(lineUserId);
-
-  if (!expectedToken) return false;
-
-  return safeEqual(accessToken, expectedToken);
+  return verifyDashboardAccessToken(lineUserId, accessToken);
 }
 
 export function isRateLimited(
@@ -225,6 +235,32 @@ function pruneRateLimitStore(store: Map<string, RateLimitEntry>, now: number) {
   }
 
   globalForSecurity.__moneyLeakLastRateLimitCleanupAt = now;
+}
+
+function verifyDashboardAccessToken(lineUserId: string, accessToken: string) {
+  const secret = getDashboardAccessSecret();
+  const tokenParts = accessToken.split(".");
+
+  if (tokenParts.length !== 3) return false;
+
+  const [version, expiresAtValue, receivedSignature] = tokenParts;
+  const expiresAt = Number(expiresAtValue);
+
+  if (
+    !secret ||
+    version !== DASHBOARD_TOKEN_VERSION ||
+    !Number.isInteger(expiresAt) ||
+    expiresAt <= Math.floor(Date.now() / 1000) ||
+    !receivedSignature
+  ) {
+    return false;
+  }
+
+  const expectedSignature = createHmac("sha256", secret)
+    .update(`${DASHBOARD_TOKEN_VERSION}:${lineUserId}:${expiresAt}`)
+    .digest("base64url");
+
+  return safeEqual(receivedSignature, expectedSignature);
 }
 
 function safeEqual(left: string, right: string) {

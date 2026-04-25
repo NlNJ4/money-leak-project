@@ -2,7 +2,14 @@ import { randomUUID } from "node:crypto";
 import { buildDashboardSummary } from "@/lib/analyze";
 import { categoryOrder } from "@/lib/categories";
 import { DEMO_LINE_USER_ID } from "@/lib/constants";
-import { getBangkokDateKey, toBangkokIso } from "@/lib/date";
+import {
+  getBangkokCalendarContext,
+  getBangkokDateKey,
+  getBangkokDayStartIso,
+  getBangkokMonthStartIso,
+  getRecentBangkokDateKeys,
+  toBangkokIso,
+} from "@/lib/date";
 import { detectCategory } from "@/lib/parser";
 import {
   MAX_EXPENSE_AMOUNT_BAHT,
@@ -25,6 +32,7 @@ export { DEMO_LINE_USER_ID };
 
 type ExpenseInput = {
   lineUserId: string;
+  lineWebhookEventId?: string | null;
   title: string;
   amountBaht: number;
   category?: ExpenseCategory;
@@ -43,6 +51,11 @@ type LineUserRow = Database["public"]["Tables"]["line_users"]["Row"];
 const globalForMoneyLeak = globalThis as typeof globalThis & {
   __moneyLeakStore?: MoneyLeakStore;
 };
+
+const DEFAULT_EXPENSE_QUERY_LIMIT = 100;
+const DASHBOARD_EXPENSE_QUERY_LIMIT = 1_000;
+const MAX_EXPENSE_QUERY_LIMIT = 1_000;
+const MAX_LINE_WEBHOOK_EVENT_ID_LENGTH = 128;
 
 export function getDefaultLineUserId() {
   return (
@@ -97,6 +110,7 @@ function createDemoExpenses(now = new Date()): Expense[] {
     return {
       id: `demo-${index + 1}`,
       lineUserId: DEMO_LINE_USER_ID,
+      lineWebhookEventId: null,
       title: row.title,
       amountBaht: row.amountBaht,
       category: detectCategory(row.title),
@@ -133,6 +147,7 @@ function mapExpense(row: ExpenseRow): Expense {
   return {
     id: row.id,
     lineUserId: row.line_user_id,
+    lineWebhookEventId: row.line_webhook_event_id,
     title: row.title,
     amountBaht: row.amount_baht,
     category: toExpenseCategory(row.category),
@@ -188,10 +203,33 @@ function listMemoryExpenses(lineUserId = DEMO_LINE_USER_ID) {
     );
 }
 
+function filterAndLimitExpenses(
+  expenses: Expense[],
+  { limit, since }: { limit: number; since?: string },
+) {
+  return (since
+    ? expenses.filter((expense) => expense.spentAt >= since)
+    : expenses
+  ).slice(0, limit);
+}
+
 function createMemoryExpense(input: ExpenseInput) {
+  const lineWebhookEventId = normalizeLineWebhookEventId(
+    input.lineWebhookEventId,
+  );
+  const existingExpense =
+    lineWebhookEventId === null
+      ? null
+      : getStore().expenses.find(
+          (expense) => expense.lineWebhookEventId === lineWebhookEventId,
+        );
+
+  if (existingExpense) return existingExpense;
+
   const expense: Expense = {
     id: randomUUID(),
     lineUserId: input.lineUserId,
+    lineWebhookEventId,
     title: input.title.trim(),
     amountBaht: input.amountBaht,
     category: toExpenseCategory(input.category ?? detectCategory(input.title)),
@@ -203,6 +241,24 @@ function createMemoryExpense(input: ExpenseInput) {
   getStore().expenses.push(expense);
 
   return expense;
+}
+
+function normalizeLineWebhookEventId(value: string | null | undefined) {
+  if (typeof value !== "string") return null;
+
+  const candidate = value.trim();
+
+  if (!candidate || candidate.length > MAX_LINE_WEBHOOK_EVENT_ID_LENGTH) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function normalizeExpenseQueryLimit(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_EXPENSE_QUERY_LIMIT;
+
+  return Math.min(Math.max(Math.trunc(value), 1), MAX_EXPENSE_QUERY_LIMIT);
 }
 
 function validateExpenseInput(input: ExpenseInput) {
@@ -229,6 +285,31 @@ function validateExpenseInput(input: ExpenseInput) {
   ) {
     throw new Error("Expense amount must be a positive integer baht amount");
   }
+}
+
+async function getExpenseByLineWebhookEventId(
+  lineUserId: string,
+  lineWebhookEventId: string,
+) {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("expenses")
+    .select("*")
+    .eq("line_user_id", lineUserId)
+    .eq("line_webhook_event_id", lineWebhookEventId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Supabase duplicate expense lookup failed", {
+      code: error.code,
+      message: error.message,
+    });
+    throw new Error("Unable to load existing expense");
+  }
+
+  return data ? mapExpense(data) : null;
 }
 
 async function ensureLineUser(lineUserId: string) {
@@ -320,17 +401,45 @@ export async function updateDailyBudget(
   return mapBudget(data);
 }
 
-export async function listExpenses(lineUserId = DEMO_LINE_USER_ID) {
-  if (shouldUseMemory(lineUserId)) return listMemoryExpenses(lineUserId);
+export async function listExpenses(
+  lineUserId = DEMO_LINE_USER_ID,
+  {
+    limit = DEFAULT_EXPENSE_QUERY_LIMIT,
+    since,
+  }: {
+    limit?: number;
+    since?: string;
+  } = {},
+) {
+  const safeLimit = normalizeExpenseQueryLimit(limit);
+
+  if (shouldUseMemory(lineUserId)) {
+    return filterAndLimitExpenses(listMemoryExpenses(lineUserId), {
+      limit: safeLimit,
+      since,
+    });
+  }
 
   const supabase = getSupabaseAdminClient();
-  if (!supabase) return listMemoryExpenses(lineUserId);
+  if (!supabase) {
+    return filterAndLimitExpenses(listMemoryExpenses(lineUserId), {
+      limit: safeLimit,
+      since,
+    });
+  }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("expenses")
     .select("*")
     .eq("line_user_id", lineUserId)
-    .order("spent_at", { ascending: false });
+    .order("spent_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (since) {
+    query = query.gte("spent_at", since);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("Supabase expenses select failed", {
@@ -350,6 +459,7 @@ export async function createExpense(input: ExpenseInput) {
     ...input,
     title: input.title.trim(),
     lineUserId: normalizeLineUserId(input.lineUserId, "") ?? input.lineUserId,
+    lineWebhookEventId: normalizeLineWebhookEventId(input.lineWebhookEventId),
     category: toExpenseCategory(input.category ?? detectCategory(input.title)),
   };
 
@@ -370,10 +480,20 @@ export async function createExpense(input: ExpenseInput) {
       amount_baht: input.amountBaht,
       category: normalizedInput.category,
       is_need: input.isNeed ?? false,
+      line_webhook_event_id: normalizedInput.lineWebhookEventId,
       spent_at: input.spentAt ?? new Date().toISOString(),
     })
     .select("*")
     .single();
+
+  if (error?.code === "23505" && normalizedInput.lineWebhookEventId) {
+    const existingExpense = await getExpenseByLineWebhookEventId(
+      normalizedInput.lineUserId,
+      normalizedInput.lineWebhookEventId,
+    );
+
+    if (existingExpense) return existingExpense;
+  }
 
   if (error || !data) {
     console.error("Supabase expenses insert failed", {
@@ -391,7 +511,14 @@ export async function getDashboardSummary(
   now = new Date(),
 ): Promise<DashboardSummary> {
   const budget = await getBudget(lineUserId);
-  const expenses = await listExpenses(lineUserId);
+  const { monthKey } = getBangkokCalendarContext(now);
+  const recentStartKey = getRecentBangkokDateKeys(7, now)[0];
+  const monthStartIso = getBangkokMonthStartIso(monthKey);
+  const trendStartIso = getBangkokDayStartIso(recentStartKey);
+  const expenses = await listExpenses(lineUserId, {
+    limit: DASHBOARD_EXPENSE_QUERY_LIMIT,
+    since: monthStartIso < trendStartIso ? monthStartIso : trendStartIso,
+  });
 
   return buildDashboardSummary({
     expenses,

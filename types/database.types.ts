@@ -43,6 +43,7 @@ export type Database = {
         Row: {
           id: string;
           line_user_id: string;
+          line_webhook_event_id: string | null;
           title: string;
           amount_baht: number;
           category: string;
@@ -53,6 +54,7 @@ export type Database = {
         Insert: {
           id?: string;
           line_user_id: string;
+          line_webhook_event_id?: string | null;
           title: string;
           amount_baht: number;
           category: string;
@@ -63,6 +65,7 @@ export type Database = {
         Update: {
           id?: string;
           line_user_id?: string;
+          line_webhook_event_id?: string | null;
           title?: string;
           amount_baht?: number;
           category?: string;
