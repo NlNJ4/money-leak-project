@@ -1,7 +1,9 @@
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { PrivateDashboardMessage } from "@/components/dashboard/private-dashboard-message";
+import { normalizeDashboardExpenseFilters } from "@/lib/dashboard-filters";
 import {
   getDefaultLineUserId,
+  getDashboardExpenseResult,
   getDashboardSummary,
 } from "@/lib/expense-service";
 import {
@@ -16,7 +18,11 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{
     accessToken?: string | string[];
+    category?: string | string[];
+    limit?: string | string[];
     lineUserId?: string | string[];
+    q?: string | string[];
+    range?: string | string[];
   }>;
 }) {
   await connection();
@@ -46,7 +52,19 @@ export default async function DashboardPage({
     return <PrivateDashboardMessage />;
   }
 
-  const summary = await getDashboardSummary(lineUserId);
+  const expenseFilters = normalizeDashboardExpenseFilters(params);
+  const [summary, expenseResult] = await Promise.all([
+    getDashboardSummary(lineUserId),
+    getDashboardExpenseResult(lineUserId, expenseFilters),
+  ]);
 
-  return <DashboardView accessToken={accessToken} summary={summary} />;
+  return (
+    <DashboardView
+      accessToken={accessToken}
+      dashboardAction="/dashboard"
+      expenseFilters={expenseFilters}
+      expenseResult={expenseResult}
+      summary={summary}
+    />
+  );
 }

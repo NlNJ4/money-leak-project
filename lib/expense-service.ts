@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { buildDashboardSummary } from "@/lib/analyze";
 import { categoryOrder } from "@/lib/categories";
+import {
+  buildDashboardExpenseResult,
+  getDashboardExpenseSinceIso,
+  type DashboardExpenseFilters,
+} from "@/lib/dashboard-filters";
 import { DEMO_LINE_USER_ID } from "@/lib/constants";
 import {
   getBangkokDateKey,
@@ -752,4 +757,17 @@ export async function getDashboardSummary(
     dataMode: shouldUseMemory(lineUserId) ? "demo" : "user",
     now,
   });
+}
+
+export async function getDashboardExpenseResult(
+  lineUserId = DEMO_LINE_USER_ID,
+  filters: DashboardExpenseFilters,
+  now = new Date(),
+) {
+  const expenses = await listExpenses(lineUserId, {
+    limit: DASHBOARD_EXPENSE_QUERY_LIMIT,
+    since: getDashboardExpenseSinceIso(filters.range, now),
+  });
+
+  return buildDashboardExpenseResult(expenses, filters);
 }

@@ -1,7 +1,9 @@
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { PrivateDashboardMessage } from "@/components/dashboard/private-dashboard-message";
+import { normalizeDashboardExpenseFilters } from "@/lib/dashboard-filters";
 import {
   getDefaultLineUserId,
+  getDashboardExpenseResult,
   getDashboardSummary,
 } from "@/lib/expense-service";
 import { getSingleSearchParam, hasLineUserDataAccess } from "@/lib/security";
@@ -10,7 +12,13 @@ import { connection } from "next/server";
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ accessToken?: string | string[] }>;
+  searchParams: Promise<{
+    accessToken?: string | string[];
+    category?: string | string[];
+    limit?: string | string[];
+    q?: string | string[];
+    range?: string | string[];
+  }>;
 }) {
   await connection();
 
@@ -29,7 +37,19 @@ export default async function Home({
     return <PrivateDashboardMessage />;
   }
 
-  const summary = await getDashboardSummary(lineUserId);
+  const expenseFilters = normalizeDashboardExpenseFilters(params);
+  const [summary, expenseResult] = await Promise.all([
+    getDashboardSummary(lineUserId),
+    getDashboardExpenseResult(lineUserId, expenseFilters),
+  ]);
 
-  return <DashboardView accessToken={accessToken} summary={summary} />;
+  return (
+    <DashboardView
+      accessToken={accessToken}
+      dashboardAction="/"
+      expenseFilters={expenseFilters}
+      expenseResult={expenseResult}
+      summary={summary}
+    />
+  );
 }

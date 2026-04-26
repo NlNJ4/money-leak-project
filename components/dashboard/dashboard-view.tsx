@@ -3,13 +3,17 @@ import { BudgetSettings } from "@/components/dashboard/budget-settings";
 import { CategoryBarList } from "@/components/dashboard/category-bar-list";
 import { DailyTrend } from "@/components/dashboard/daily-trend";
 import { ExportCsvLink } from "@/components/dashboard/export-csv-link";
-import { ExpenseList } from "@/components/dashboard/expense-list";
+import { ExpenseExplorer } from "@/components/dashboard/expense-explorer";
 import { LeakInsightList } from "@/components/dashboard/leak-insight-list";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { RecurringReminderList } from "@/components/dashboard/recurring-reminder-list";
 import { SectionPanel } from "@/components/dashboard/section-panel";
 import { StatusPill } from "@/components/dashboard/status-pill";
 import { SubscriptionInsightList } from "@/components/dashboard/subscription-insight-list";
+import type {
+  DashboardExpenseFilters,
+  DashboardExpenseResult,
+} from "@/lib/dashboard-filters";
 import { formatBaht } from "@/lib/format";
 import type { DashboardSummary } from "@/lib/types";
 
@@ -38,9 +42,15 @@ function formatAsOf(isoDate: string) {
 export function DashboardView({
   summary,
   accessToken,
+  dashboardAction,
+  expenseFilters,
+  expenseResult,
 }: {
   summary: DashboardSummary;
   accessToken?: string | null;
+  dashboardAction: string;
+  expenseFilters: DashboardExpenseFilters;
+  expenseResult: DashboardExpenseResult;
 }) {
   const hasOverDailyBudget = summary.dailyRemainingBaht < 0;
   const hasOverMonthlyBudget = summary.monthlyRemainingBaht < 0;
@@ -177,11 +187,13 @@ export function DashboardView({
             <SectionPanel title="รายจ่ายซ้ำ">
               <SubscriptionInsightList insights={summary.recurringInsights} />
             </SectionPanel>
-            <SectionPanel title="รายการล่าสุด">
-              <ExpenseList
+            <SectionPanel title="รายการรายจ่าย">
+              <ExpenseExplorer
                 accessToken={accessToken}
-                expenses={summary.recentExpenses}
+                action={dashboardAction}
+                filters={expenseFilters}
                 lineUserId={summary.lineUserId}
+                result={expenseResult}
               />
             </SectionPanel>
           </div>

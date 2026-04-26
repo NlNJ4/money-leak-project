@@ -108,6 +108,7 @@ taskkill /PID <PID> /F
 
 ## Dashboard Features
 
+- Filter expense history by range, category, and title search with show-more pagination.
 - Edit or delete recent expenses from the dashboard.
 - Review the latest 7-day total, daily average, and top spending category.
 - Detect recurring subscription-like spending from the latest 90 days.

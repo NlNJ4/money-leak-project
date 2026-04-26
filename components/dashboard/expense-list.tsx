@@ -40,10 +40,12 @@ export function ExpenseList({
   expenses,
   lineUserId,
   accessToken,
+  emptyMessage,
 }: {
   expenses: Expense[];
   lineUserId: string;
   accessToken?: string | null;
+  emptyMessage?: string;
 }) {
   const router = useRouter();
   const [updatedExpenses, setUpdatedExpenses] = useState<Record<string, Expense>>(
@@ -62,7 +64,13 @@ export function ExpenseList({
     .filter((expense) => !deletedExpenseIds[expense.id]);
   const emptyState = (
     <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500">
+      {emptyMessage ? (
+        emptyMessage
+      ) : (
+        <>
       ยังไม่มีรายการล่าสุด
+        </>
+      )}
     </p>
   );
 
