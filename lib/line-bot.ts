@@ -268,7 +268,8 @@ export async function handleLineMessage(
   let parsed: ParsedTransaction | null = null;
   try {
     parsed = await new GeminiParser().parseTransaction(trimmed);
-  } catch {
+  } catch (err) {
+    console.error("[line-bot] gemini parse failed:", err);
     return "เกิดข้อผิดพลาดในการวิเคราะห์ครับ ลองส่งใหม่อีกครั้งนะครับ";
   }
 

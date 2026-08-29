@@ -8,8 +8,9 @@ import type {
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
 // Used when the primary model is rate-limited or overloaded (429/5xx).
-// Set GEMINI_FALLBACK_MODEL="" to disable.
-const DEFAULT_FALLBACK_MODEL = "gemini-2.5-flash";
+// Set GEMINI_FALLBACK_MODEL="" to disable. Note: gemini-2.5* is retired for
+// new API keys, so pick a fallback the key can actually serve.
+const DEFAULT_FALLBACK_MODEL = "gemini-3.6-flash";
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503]);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -131,12 +132,14 @@ export class GeminiParser implements TransactionParser {
     const payload = await response.json();
     const raw = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (typeof raw !== "string") {
+      console.warn("[gemini] no text candidate returned");
       return null;
     }
 
     // Never trust the model output — validate shape, amount and category.
     const parsed = responseSchema.safeParse(JSON.parse(raw));
     if (!parsed.success || parsed.data.kind !== "transaction") {
+      console.warn("[gemini] rejected model output:", raw.slice(0, 300));
       return null;
     }
     const d = parsed.data;
