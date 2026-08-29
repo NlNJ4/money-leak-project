@@ -32,6 +32,11 @@ const th = {
     categoryBreakdown: "แยกตามหมวด",
     recentTransactions: "รายการล่าสุด",
     addTransaction: "เพิ่มรายการ",
+    line: {
+      connect: "เชื่อมต่อ LINE",
+      instructions: "ส่งโค้ดนี้ไปที่ LINE Bot ของคุณภายใน 15 นาที",
+      failed: "ขอโค้ดไม่สำเร็จ กรุณาลองอีกครั้ง",
+    },
     form: {
       title: "เพิ่มรายการใหม่",
       type: "ประเภท",
@@ -81,6 +86,11 @@ const en: Dictionary = {
     categoryBreakdown: "By category",
     recentTransactions: "Recent transactions",
     addTransaction: "Add transaction",
+    line: {
+      connect: "Connect LINE",
+      instructions: "Send this code to your LINE bot within 15 minutes",
+      failed: "Could not generate a code. Please try again.",
+    },
     form: {
       title: "New transaction",
       type: "Type",

@@ -8,6 +8,7 @@ import { formatAmountSigned, formatCurrency, formatDate } from "@/lib/format";
 import type { DashboardData } from "@/lib/transactions";
 import type { Category } from "@/lib/transactions";
 import { AddTransactionForm } from "@/components/dashboard/add-transaction-form";
+import { ConnectLine } from "@/components/dashboard/connect-line";
 
 type Period = "today" | "week" | "month" | "custom";
 
@@ -74,6 +75,7 @@ export function DashboardView({
               {formatDate(range.from, locale)} – {formatDate(range.to, locale)}
             </p>
           </div>
+          <ConnectLine />
           <button
             type="button"
             onClick={() => setFormOpen((open) => !open)}

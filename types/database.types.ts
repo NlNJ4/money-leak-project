@@ -47,6 +47,27 @@ export type Database = {
         }
         Relationships: []
       }
+      linking_codes: {
+        Row: {
+          code: string
+          created_at: string
+          expires_at: string
+          user_id: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          expires_at: string
+          user_id: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          expires_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       transactions: {
         Row: {
           amount: number
