@@ -7,6 +7,11 @@ import type {
 } from "@/lib/ai/provider";
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
+// Used when the primary model is rate-limited or overloaded (429/5xx).
+// Set GEMINI_FALLBACK_MODEL="" to disable.
+const DEFAULT_FALLBACK_MODEL = "gemini-2.5-flash";
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503]);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const responseSchema = z.object({
   kind: z.enum(["transaction", "unknown"]),
@@ -51,42 +56,76 @@ export class GeminiParser implements TransactionParser {
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY is not configured");
     }
-    const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        signal: AbortSignal.timeout(20_000),
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: buildPrompt(text) }] }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "object",
-              properties: {
-                kind: { type: "string", enum: ["transaction", "unknown"] },
-                type: { type: "string", enum: ["income", "expense"] },
-                amount: { type: "number" },
-                category: { type: "string", enum: [...CATEGORY_SLUGS] },
-                description: { type: "string" },
-                date: { type: "string" },
-              },
-              required: ["kind"],
-            },
+    const primary = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+    const fallback = process.env.GEMINI_FALLBACK_MODEL ?? DEFAULT_FALLBACK_MODEL;
+    const models = [...new Set([primary, fallback].filter(Boolean))];
+
+    let lastError: unknown;
+    for (const model of models) {
+      try {
+        const result = await this.attemptModel(model, text);
+        if (model !== primary) {
+          console.warn(`[gemini] primary ${primary} unavailable, used fallback ${model}`);
+        }
+        return result;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError ?? new Error("Gemini parse failed");
+  }
+
+  private async attemptModel(
+    model: string,
+    text: string,
+  ): Promise<ParsedTransaction | null> {
+    const apiKey = process.env.GEMINI_API_KEY!;
+    let response: Response | undefined;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await sleep(1500 * attempt);
+      }
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
           },
-        }),
-      },
-    );
+          signal: AbortSignal.timeout(20_000),
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: buildPrompt(text) }] }],
+            generationConfig: {
+              temperature: 0,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "object",
+                properties: {
+                  kind: { type: "string", enum: ["transaction", "unknown"] },
+                  type: { type: "string", enum: ["income", "expense"] },
+                  amount: { type: "number" },
+                  category: { type: "string", enum: [...CATEGORY_SLUGS] },
+                  description: { type: "string" },
+                  date: { type: "string" },
+                },
+                required: ["kind"],
+              },
+            },
+          }),
+        },
+      );
+      if (response.ok || !RETRYABLE_STATUS.has(response.status)) {
+        break;
+      }
+    }
 
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`Gemini API failed: ${response.status} ${detail}`);
+    if (!response || !response.ok) {
+      const status = response?.status ?? "no response";
+      const detail = response ? await response.text() : "";
+      throw new Error(`Gemini API failed: ${status} ${detail}`);
     }
 
     const payload = await response.json();
