@@ -5,6 +5,7 @@ const LINE_API_BASE = "https://api.line.me/v2/bot";
 
 export type LineMessageEvent = {
   type: "message";
+  id?: string;
   replyToken: string;
   source: { userId?: string };
   message: { type: string; text?: string };
@@ -12,6 +13,7 @@ export type LineMessageEvent = {
 
 export type LineWebhookBody = {
   destination?: string;
+  webhookEventId?: string;
   events: LineMessageEvent[];
 };
 

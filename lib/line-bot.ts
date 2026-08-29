@@ -8,7 +8,25 @@ function fmt(n: number): string {
   return n.toLocaleString("th-TH", { maximumFractionDigits: 2 });
 }
 
-const LINK_CODE_RE = /^MONEY-\d{4}$/;
+const LINK_CODE_RE = /^MONEY-[A-Za-z0-9_-]{22}$/;
+
+// Brute-force guard for code redemption: 5 attempts per LINE user per hour.
+// In-memory is per server instance; acceptable for a single-user MVP, but a
+// shared store (e.g. a Postgres counter) is needed for multi-instance deploys.
+const REDEEM_LIMIT = 5;
+const REDEEM_WINDOW_MS = 60 * 60 * 1000;
+const redeemAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function redeemRateLimited(lineUserId: string): boolean {
+  const now = Date.now();
+  const entry = redeemAttempts.get(lineUserId);
+  if (!entry || entry.resetAt < now) {
+    redeemAttempts.set(lineUserId, { count: 1, resetAt: now + REDEEM_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > REDEEM_LIMIT;
+}
 
 const HELP_TEXT = [
   "บันทึกรายรับรายจ่ายได้ง่าย ๆ แค่พิมพ์ส่งมาเลยครับ",
@@ -45,49 +63,41 @@ async function resolveUserId(
 
 // ---- linking ----
 
+// Redemption is one atomic database operation (redeem_linking_code RPC):
+// it locks the code row, validates expiry, consumes the code and inserts
+// the identity in a single transaction — no double-redeem races.
 export async function linkByCode(
   lineUserId: string,
   code: string,
 ): Promise<string> {
+  if (redeemRateLimited(lineUserId)) {
+    return "พยายามหลายครั้งเกินไปครับ ลองอีกครั้งในภายหลังนะครับ";
+  }
+
   const admin = createAdminClient();
-
-  const { data: linkRow } = await admin
-    .from("linking_codes")
-    .select("user_id, expires_at")
-    .eq("code", code)
-    .maybeSingle();
-
-  if (!linkRow) {
-    return "ไม่พบโค้ดนี้ครับ ตรวจสอบในหน้าแดชบอร์ดอีกครั้งนะครับ";
-  }
-  if (new Date(linkRow.expires_at) < new Date()) {
-    return "โค้ดนี้หมดอายุแล้วครับ กดขอโค้ดใหม่ในหน้าแดชบอร์ดได้เลยครับ";
-  }
-
-  const { data: existing } = await admin
-    .from("user_identities")
-    .select("user_id")
-    .eq("provider", "line")
-    .eq("provider_user_id", lineUserId)
-    .maybeSingle();
-
-  if (existing) {
-    return existing.user_id === linkRow.user_id
-      ? "บัญชีนี้เชื่อมต่อไว้แล้วครับ ✅"
-      : "LINE นี้ถูกเชื่อมต่อกับบัญชีอื่นอยู่แล้วครับ";
-  }
-
-  const { error } = await admin.from("user_identities").insert({
-    user_id: linkRow.user_id,
-    provider: "line",
-    provider_user_id: lineUserId,
+  const { data: status, error } = await admin.rpc("redeem_linking_code", {
+    p_code: code,
+    p_provider: "line",
+    p_provider_user_id: lineUserId,
   });
+
   if (error) {
+    console.error("[line-bot] redeem failed:", error.message);
     return "เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้งครับ";
   }
 
-  await admin.from("linking_codes").delete().eq("code", code);
-  return "เชื่อมต่อสำเร็จ ✅\nเริ่มบันทึกได้เลย เช่น กินข้าว 120";
+  switch (status) {
+    case "linked":
+      return "เชื่อมต่อสำเร็จ ✅\nเริ่มบันทึกได้เลย เช่น กินข้าว 120";
+    case "already_linked_same":
+      return "บัญชีนี้เชื่อมต่อไว้แล้วครับ ✅";
+    case "already_linked_other":
+      return "LINE นี้ถูกเชื่อมต่อกับบัญชีอื่นอยู่แล้วครับ";
+    case "expired":
+      return "โค้ดนี้หมดอายุแล้วครับ กดขอโค้ดใหม่ในหน้าแดชบอร์ดได้เลยครับ";
+    default:
+      return "ไม่พบโค้ดนี้ครับ ตรวจสอบในหน้าแดชบอร์ดอีกครั้งนะครับ";
+  }
 }
 
 // ---- summaries (no AI needed per spec section 11) ----
@@ -185,34 +195,41 @@ async function recentText(userId: string): Promise<string> {
 async function saveTransaction(
   userId: string,
   parsed: ParsedTransaction,
+  eventKey: string,
 ): Promise<string> {
   const admin = createAdminClient();
 
-  const { data: category } = await admin
-    .from("categories")
-    .select("id, type, icon, name_th")
-    .eq("slug", parsed.category)
-    .single();
-
-  if (!category || category.type !== parsed.type) {
-    return "หมวดหมู่ไม่ถูกต้องครับ ลองพิมพ์ใหม่อีกครั้งนะครับ";
-  }
-
-  const { error } = await admin.from("transactions").insert({
-    user_id: userId,
-    type: parsed.type,
-    amount: parsed.amount,
-    category_id: category.id,
-    description: parsed.description,
-    transaction_date: parsed.date,
-    source: "line",
+  // Atomic + idempotent: the webhook event marker and the transaction are
+  // written in one transaction, so duplicate LINE deliveries cannot
+  // double-save (audit item 4).
+  const { data: status, error } = await admin.rpc("save_line_transaction", {
+    p_event_key: eventKey,
+    p_user_id: userId,
+    p_type: parsed.type,
+    p_amount: parsed.amount,
+    p_category_slug: parsed.category,
+    p_description: parsed.description,
+    p_transaction_date: parsed.date,
   });
 
   if (error) {
+    console.error("[line-bot] save failed:", error.message);
     return "บันทึกไม่สำเร็จครับ ลองใหม่อีกครั้งนะครับ";
   }
+  if (status === "duplicate") {
+    return "รายการนี้บันทึกไปแล้วครับ ✅";
+  }
+  if (status !== "saved") {
+    return "หมวดหมู่ไม่ถูกต้องครับ ลองพิมพ์ใหม่อีกครั้งนะครับ";
+  }
 
-  const head = `✅ บันทึกแล้ว\n\n${category.icon} ${category.name_th}\n${fmt(parsed.amount)} บาท`;
+  const { data: category } = await admin
+    .from("categories")
+    .select("icon, name_th")
+    .eq("slug", parsed.category)
+    .single();
+
+  const head = `✅ บันทึกแล้ว\n\n${category?.icon ?? "📦"} ${category?.name_th ?? parsed.description}\n${fmt(parsed.amount)} บาท`;
   if (parsed.type !== "expense") {
     return head;
   }
@@ -232,6 +249,7 @@ async function saveTransaction(
 export async function handleLineMessage(
   lineUserId: string,
   text: string,
+  eventKey = "manual",
 ): Promise<string> {
   const trimmed = text.trim();
 
@@ -277,7 +295,7 @@ export async function handleLineMessage(
     return "ไม่เข้าใจข้อความครับ ลองแบบนี้ดู: กินข้าว 120 หรือพิมพ์ ช่วย เพื่อดูตัวอย่าง";
   }
 
-  return saveTransaction(userId, parsed);
+  return saveTransaction(userId, parsed, eventKey);
 }
 
 function isoToday(): string {

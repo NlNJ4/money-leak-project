@@ -147,7 +147,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      redeem_linking_code: {
+        Args: {
+          p_code: string
+          p_provider: string
+          p_provider_user_id: string
+        }
+        Returns: string
+      }
+      save_line_transaction: {
+        Args: {
+          p_event_key: string
+          p_user_id: string
+          p_type: string
+          p_amount: number
+          p_category_slug: string
+          p_description: string
+          p_transaction_date: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
