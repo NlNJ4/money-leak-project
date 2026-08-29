@@ -4,7 +4,9 @@ import { LoginPanel } from "@/components/auth/login-panel";
 
 export default async function LoginPage({
   searchParams,
-}: PageProps<"/login">) {
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { error } = await searchParams;
 
   const supabase = await createClient();
