@@ -42,7 +42,6 @@ export type DashboardData = {
   totals: { income: number; expense: number; net: number };
   byCategory: CategoryTotal[];
   recent: TransactionRow[];
-  count: number;
 };
 
 async function requireClient() {
@@ -109,52 +108,35 @@ export async function listTransactions(
   return (data ?? []) as unknown as TransactionRow[];
 }
 
-// Personal-scale MVP: one range query, aggregate in JS. Move to SQL/RPC
-// if a user's volume ever makes this slow.
+// Totals + breakdown come from a PostgreSQL aggregate (dashboard_summary)
+// so results are exact at any volume; the recent list is a small paged query.
 export async function getDashboardData(
   range: TransactionFilterRange,
 ): Promise<DashboardData> {
-  const rows = await listTransactions(range, 500);
+  const { supabase } = await requireClient();
 
-  let income = 0;
-  let expense = 0;
-  const categoryTotals = new Map<string, CategoryTotal>();
-
-  for (const row of rows) {
-    const amount = Number(row.amount);
-    if (row.type === "income") {
-      income += amount;
-    } else if (row.type === "expense") {
-      expense += amount;
-    }
-
-    if (row.category && row.type !== "transfer") {
-      const key = `${row.type}:${row.category.slug}`;
-      const existing = categoryTotals.get(key);
-      if (existing) {
-        existing.total += amount;
-      } else {
-        categoryTotals.set(key, {
-          slug: row.category.slug,
-          icon: row.category.icon,
-          name_th: row.category.name_th,
-          name_en: row.category.name_en,
-          type: row.type,
-          total: amount,
-        });
-      }
-    }
-  }
-
-  const byCategory = [...categoryTotals.values()].sort(
-    (a, b) => b.total - a.total,
+  const { data: summary, error: summaryError } = await supabase.rpc(
+    "dashboard_summary",
+    { p_from: range.from, p_to: range.to },
   );
 
+  if (summaryError) {
+    throw new ServiceError("query_failed", summaryError.message);
+  }
+
+  // Scalar-return functions come back unwrapped; be tolerant of either shape.
+  const value = Array.isArray(summary) ? summary[0] : summary;
+  const parsed = value as unknown as {
+    totals: { income: number; expense: number; net: number };
+    byCategory: CategoryTotal[];
+  } | null;
+
+  const recent = await listTransactions(range, 10);
+
   return {
-    totals: { income, expense, net: income - expense },
-    byCategory,
-    recent: rows.slice(0, 10),
-    count: rows.length,
+    totals: parsed?.totals ?? { income: 0, expense: 0, net: 0 },
+    byCategory: parsed?.byCategory ?? [],
+    recent,
   };
 }
 

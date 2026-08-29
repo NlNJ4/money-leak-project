@@ -157,6 +157,10 @@ declare
   v_category_id uuid;
   v_category_type text;
 begin
+  -- Opportunistic cleanup of old dedup markers.
+  delete from public.webhook_events
+  where received_at < now() - interval '7 days';
+
   insert into public.webhook_events (id)
   values (p_event_key)
   on conflict (id) do nothing;

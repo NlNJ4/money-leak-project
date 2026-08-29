@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { CATEGORY_SLUGS } from "@/lib/categories";
+import { toISODate, todayISO as todayISOBangkok } from "@/lib/date";
 import type {
   ParsedTransaction,
   TransactionParser,
@@ -24,8 +25,10 @@ const responseSchema = z.object({
 });
 
 function buildPrompt(text: string): string {
-  const today = new Date();
-  const todayISO = today.toISOString().slice(0, 10);
+  // Bangkok wall-clock "today", so relative dates resolve correctly on UTC
+  // servers between 00:00 and 07:00 ICT (audit item 9).
+  const todayISO = todayISOBangkok();
+  const yesterdayISO = toISODate(new Date(Date.now() - 86_400_000));
 
   return `คุณคือผู้ช่วยบันทึกรายรับรายจ่าย จงแปลงข้อความภาษาไทยหรืออังกฤษเป็นข้อมูลธุรกรรม
 
@@ -44,7 +47,7 @@ function buildPrompt(text: string): string {
 "กินข้าว 120" → {"kind":"transaction","type":"expense","amount":120,"category":"food","description":"กินข้าว","date":"${todayISO}"}
 "ได้เงิน 2000" → {"kind":"transaction","type":"income","amount":2000,"category":"other_income","description":"ได้เงิน","date":"${todayISO}"}
 "เติมน้ำมัน 800" → {"kind":"transaction","type":"expense","amount":800,"category":"transport","description":"เติมน้ำมัน","date":"${todayISO}"}
-"เมื่อวานไปกินตี๋น้อยกับเพื่อนหมดไป 829" → {"kind":"transaction","type":"expense","amount":829,"category":"food","description":"ไปกินตี๋น้อยกับเพื่อน","date":"<วันเมื่อวาน>"}
+"เมื่อวานไปกินตี๋น้อยกับเพื่อนหมดไป 829" → {"kind":"transaction","type":"expense","amount":829,"category":"food","description":"ไปกินตี๋น้อยกับเพื่อน","date":"${yesterdayISO}"}
 "ให้แม่ 2000" → {"kind":"transaction","type":"expense","amount":2000,"category":"family","description":"ให้แม่","date":"${todayISO}"}
 
 ข้อความของผู้ใช้:
@@ -82,11 +85,13 @@ export class GeminiParser implements TransactionParser {
     text: string,
   ): Promise<ParsedTransaction | null> {
     const apiKey = process.env.GEMINI_API_KEY!;
+    // Keep the whole parse (retries + fallback) well inside LINE's reply-token
+    // window: 2 attempts x 12s per model, ~50s worst case across both models.
     let response: Response | undefined;
 
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) {
-        await sleep(1500 * attempt);
+        await sleep(1500);
       }
       response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -96,11 +101,13 @@ export class GeminiParser implements TransactionParser {
             "Content-Type": "application/json",
             "x-goog-api-key": apiKey,
           },
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(12_000),
           body: JSON.stringify({
             contents: [{ parts: [{ text: buildPrompt(text) }] }],
             generationConfig: {
-              temperature: 0,
+              // Gemini 3.x removed temperature/top_p/top_k; sending them may
+              // fail the request (audit item 7).
+              ...(/^gemini-3/.test(model) ? {} : { temperature: 0 }),
               responseMimeType: "application/json",
               responseSchema: {
                 type: "object",

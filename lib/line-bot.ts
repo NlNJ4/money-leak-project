@@ -1,6 +1,7 @@
 import "server-only";
 import { GeminiParser } from "@/lib/ai/gemini";
 import type { ParsedTransaction } from "@/lib/ai/provider";
+import { monthRange, todayISO } from "@/lib/date";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // All replies are Thai-first: the bot conversation is Thai per the spec.
@@ -45,19 +46,22 @@ const NOT_LINKED_TEXT = [
   "สวัสดี 👋 บอทนี้ใช้บันทึกรายรับ–รายจ่ายของคุณ",
   "เริ่มใช้งาน:",
   "1. เข้าเว็บแดชบอร์ด กดปุ่ม \"เชื่อมต่อ LINE\"",
-  "2. ส่งโค้ดที่ได้ (เช่น MONEY-1234) มาที่นี่",
+  "2. ส่งโค้ดที่ได้ (ขึ้นต้นด้วย MONEY-) มาที่นี่",
 ].join("\n");
 
 async function resolveUserId(
   admin: ReturnType<typeof createAdminClient>,
   lineUserId: string,
 ): Promise<string | null> {
-  const { data } = await admin
+  const { data, error } = await admin
     .from("user_identities")
     .select("user_id")
     .eq("provider", "line")
     .eq("provider_user_id", lineUserId)
     .maybeSingle();
+  if (error) {
+    throw new Error(`identity lookup failed: ${error.message}`);
+  }
   return data?.user_id ?? null;
 }
 
@@ -109,7 +113,7 @@ async function rangeRows(
   userId: string,
   range: Range,
 ) {
-  const { data } = await admin
+  const { data, error } = await admin
     .from("transactions")
     .select(
       "type, amount, transaction_date, category:categories(icon, name_th)",
@@ -118,6 +122,10 @@ async function rangeRows(
     .gte("transaction_date", range.from)
     .lte("transaction_date", range.to)
     .order("transaction_date", { ascending: false });
+  if (error) {
+    // Never answer with a believable ฿0 summary on a database failure.
+    throw new Error(`summary query failed: ${error.message}`);
+  }
   return data ?? [];
 }
 
@@ -170,13 +178,16 @@ async function summaryForRange(
 
 async function recentText(userId: string): Promise<string> {
   const admin = createAdminClient();
-  const { data } = await admin
+  const { data, error } = await admin
     .from("transactions")
     .select("type, amount, category:categories(icon, name_th)")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(5);
 
+  if (error) {
+    throw new Error(`recent query failed: ${error.message}`);
+  }
   if (!data || data.length === 0) {
     return "🕘 ล่าสุด\n\nยังไม่มีรายการครับ";
   }
@@ -234,9 +245,8 @@ async function saveTransaction(
     return head;
   }
 
-  const today = new Date();
-  const iso = today.toISOString().slice(0, 10);
-  const rows = await rangeRows(admin, userId, { from: iso, to: iso });
+  const today = todayISO();
+  const rows = await rangeRows(admin, userId, { from: today, to: today });
   const spentToday = rows
     .filter((r) => r.type === "expense")
     .reduce((sum, r) => sum + Number(r.amount), 0);
@@ -264,15 +274,15 @@ export async function handleLineMessage(
   }
 
   if (trimmed === "วันนี้") {
-    return summaryForRange(userId, { from: isoToday(), to: isoToday() }, "วันนี้");
+    const today = todayISO();
+    return summaryForRange(userId, { from: today, to: today }, "วันนี้");
   }
   if (trimmed === "เดือนนี้") {
+    const range = monthRange();
     const now = new Date();
-    const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-    const to = isoToday();
     return summaryForRange(
       userId,
-      { from, to },
+      range,
       `${now.getMonth() + 1}/${now.getFullYear()}`,
     );
   }
@@ -296,8 +306,4 @@ export async function handleLineMessage(
   }
 
   return saveTransaction(userId, parsed, eventKey);
-}
-
-function isoToday(): string {
-  return new Date().toISOString().slice(0, 10);
 }

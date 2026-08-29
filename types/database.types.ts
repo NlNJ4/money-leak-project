@@ -147,6 +147,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      dashboard_summary: {
+        Args: {
+          p_from: string
+          p_to: string
+        }
+        Returns: Json
+      }
       redeem_linking_code: {
         Args: {
           p_code: string

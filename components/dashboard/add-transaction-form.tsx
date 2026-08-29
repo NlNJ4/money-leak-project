@@ -59,6 +59,8 @@ export function AddTransactionForm({
       setAmount("");
       setDescription("");
       onSaved();
+    } catch {
+      setError(t.dashboard.errors.generic);
     } finally {
       setSaving(false);
     }

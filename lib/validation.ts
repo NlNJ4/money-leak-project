@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidISODate } from "@/lib/date";
 import { CATEGORY_SLUGS } from "@/lib/categories";
 
 // 'transfer' is postponed per the spec (section 8).
@@ -10,15 +11,23 @@ export const createTransactionSchema = z.object({
     .max(999_999_999, "amount too large"),
   category: z.enum(CATEGORY_SLUGS),
   description: z.string().trim().max(200).default(""),
-  // ISO date (YYYY-MM-DD); defaults to today in the service.
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  // Real calendar date (YYYY-MM-DD) — rejects 2026-99-99 (audit item 15).
+  date: z
+    .string()
+    .refine(isValidISODate, "invalid date")
+    .optional(),
 });
 
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 
-export const transactionFilterSchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-});
+export const transactionFilterSchema = z
+  .object({
+    from: z.string(),
+    to: z.string(),
+  })
+  .refine(
+    (v) => isValidISODate(v.from) && isValidISODate(v.to) && v.from <= v.to,
+    "invalid range",
+  );
 
 export type TransactionFilterRange = z.infer<typeof transactionFilterSchema>;
