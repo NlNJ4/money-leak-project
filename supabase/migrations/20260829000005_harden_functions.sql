@@ -12,4 +12,4 @@ end;
 $$;
 
 -- Platform-installed RLS safety net; not meant to be callable over the API.
-revoke execute on function public.rls_auto_enable() from anon, authenticated;
+revoke execute on function public.rls_auto_enable() from public;
