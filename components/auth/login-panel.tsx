@@ -1,19 +1,12 @@
 "use client";
 
-import { useActionState } from "react";
 import { signInWithGoogle } from "@/app/login/actions";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
+import { useFormStatus } from "react-dom";
 import { useI18n } from "@/lib/i18n/provider";
 
 export function LoginPanel({ hasError }: { hasError: boolean }) {
   const { t } = useI18n();
-  const [errorMessage, formAction, pending] = useActionState(
-    async (_prev: string | null) => {
-      await signInWithGoogle();
-      return null;
-    },
-    null,
-  );
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-8 p-6">
@@ -29,20 +22,28 @@ export function LoginPanel({ hasError }: { hasError: boolean }) {
         <p className="text-sm text-zinc-500">{t.login.subtitle}</p>
       </div>
 
-      <form action={formAction} className="flex w-full max-w-sm flex-col gap-3">
-        <button
-          type="submit"
-          disabled={pending}
-          className="flex w-full items-center justify-center gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-60"
-        >
-          <GoogleIcon />
-          {pending ? "..." : t.login.signInWithGoogle}
-        </button>
-        {(hasError || errorMessage) && (
+      <form action={signInWithGoogle} className="flex w-full max-w-sm flex-col gap-3">
+        <SubmitButton label={t.login.signInWithGoogle} />
+        {hasError && (
           <p className="text-center text-sm text-red-500">{t.login.error}</p>
         )}
       </form>
     </main>
+  );
+}
+
+function SubmitButton({ label }: { label: string }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="flex w-full items-center justify-center gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-60"
+    >
+      <GoogleIcon />
+      {pending ? "..." : label}
+    </button>
   );
 }
 

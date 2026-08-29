@@ -61,6 +61,31 @@ const transactionSelect = `
   category:categories (slug, name_th, name_en, icon)
 `;
 
+export type Category = {
+  id: string;
+  slug: string;
+  name_th: string;
+  name_en: string;
+  icon: string;
+  type: string;
+};
+
+export async function listCategories(): Promise<Category[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("categories")
+    .select("id, slug, name_th, name_en, icon, type")
+    .order("type")
+    .order("sort_order");
+
+  if (error) {
+    throw new ServiceError("query_failed", error.message);
+  }
+
+  return (data ?? []) as Category[];
+}
+
 export async function listTransactions(
   range: TransactionFilterRange,
   limit = 100,
