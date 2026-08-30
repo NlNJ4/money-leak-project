@@ -9,7 +9,7 @@ function fmt(n: number): string {
   return n.toLocaleString("th-TH", { maximumFractionDigits: 2 });
 }
 
-const LINK_CODE_RE = /^MONEY-[A-Za-z0-9_-]{22}$/;
+const LINK_CODE_RE = /^money-([A-Za-z0-9_-]{22})$/i;
 
 // Brute-force guard for code redemption: 5 attempts per LINE user per hour.
 // In-memory is per server instance; acceptable for a single-user MVP, but a
@@ -263,8 +263,11 @@ export async function handleLineMessage(
 ): Promise<string> {
   const trimmed = text.trim();
 
-  if (LINK_CODE_RE.test(trimmed.toUpperCase())) {
-    return linkByCode(lineUserId, trimmed.toUpperCase());
+  // Normalize the prefix only — the base64url token itself is case-sensitive
+  // and must reach the database exactly as generated (audit: uppercase bug).
+  const codeMatch = trimmed.match(LINK_CODE_RE);
+  if (codeMatch) {
+    return linkByCode(lineUserId, `MONEY-${codeMatch[1]}`);
   }
 
   const admin = createAdminClient();
