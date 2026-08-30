@@ -1,21 +1,32 @@
 import "server-only";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 const LINE_API_BASE = "https://api.line.me/v2/bot";
 
 export type LineMessageEvent = {
   type: "message";
-  id?: string;
+  // LINE puts webhookEventId on each event object, not on the request body.
+  webhookEventId?: string;
   replyToken: string;
   source: { userId?: string };
-  message: { type: string; text?: string };
+  message: { type: string; id?: string; text?: string };
 };
 
 export type LineWebhookBody = {
   destination?: string;
-  webhookEventId?: string;
   events: LineMessageEvent[];
 };
+
+// Dedup key for idempotent processing (audit item 4). Preference:
+// LINE's webhookEventId → the unique message id → a random key (fail open:
+// a rare missed dedup beats falsely blocking saves).
+export function buildEventKey(event: LineMessageEvent, index: number): string {
+  return (
+    event.webhookEventId ??
+    event.message.id ??
+    `unidentified-${index}-${randomUUID()}`
+  );
+}
 
 // Reject unsigned/invalid requests before any processing.
 export function verifyLineSignature(
