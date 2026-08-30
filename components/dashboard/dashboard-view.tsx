@@ -8,6 +8,8 @@ import { formatAmountSigned, formatCurrency, formatDate } from "@/lib/format";
 import type { DashboardData } from "@/lib/transactions";
 import type { Category } from "@/lib/transactions";
 import { AddTransactionForm } from "@/components/dashboard/add-transaction-form";
+import { CategoryDonut } from "@/components/dashboard/category-donut";
+import { DailyChart } from "@/components/dashboard/daily-chart";
 import { ConnectLine } from "@/components/dashboard/connect-line";
 
 type Period = "today" | "week" | "month" | "custom";
@@ -134,31 +136,23 @@ export function DashboardView({
           {period === "custom" && <CustomRange from={range.from} to={range.to} />}
         </section>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <CategoryCard
-            title={t.dashboard.categoryBreakdown}
-            items={data.byCategory.map((c) => ({
-              key: `${c.type}:${c.slug}`,
-              icon: c.icon,
-              name: categoryLabel(c),
-              total: c.total,
-              type: c.type,
-            }))}
-          />
-          <RecentCard
-            title={t.dashboard.recentTransactions}
-            empty={t.dashboard.empty}
-            items={data.recent.map((r) => ({
-              key: r.id,
-              icon: r.category?.icon ?? "📦",
-              name: r.category ? categoryLabel(r.category) : "—",
-              description: r.description,
-              date: formatDate(r.transaction_date, locale),
-              signed: formatAmountSigned(r.type, Number(r.amount)),
-              income: r.type === "income",
-            }))}
-          />
-        </div>
+        <CategoryDonut items={data.byCategory} total={data.totals.expense} />
+
+        <DailyChart data={data.dailyTotals} />
+
+        <RecentCard
+          title={t.dashboard.recentTransactions}
+          empty={t.dashboard.empty}
+          items={data.recent.map((r) => ({
+            key: r.id,
+            icon: r.category?.icon ?? "📦",
+            name: r.category ? categoryLabel(r.category) : "—",
+            description: r.description,
+            date: formatDate(r.transaction_date, locale),
+            signed: formatAmountSigned(r.type, Number(r.amount)),
+            income: r.type === "income",
+          }))}
+        />
       </main>
     </div>
   );
@@ -202,51 +196,6 @@ function CustomRange({ from, to }: { from: string; to: string }) {
         {t.dashboard.period.apply}
       </button>
     </form>
-  );
-}
-
-function CategoryCard({
-  title,
-  items,
-}: {
-  title: string;
-  items: { key: string; icon: string; name: string; total: number; type: string }[];
-}) {
-  const { locale } = useI18n();
-  const max = Math.max(...items.map((i) => i.total), 1);
-
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-medium">{title}</h2>
-      <ul className="mt-3 flex flex-col gap-3">
-        {items.length === 0 && <li className="text-xs text-zinc-400">—</li>}
-        {items.map((item) => (
-          <li key={item.key} className="flex flex-col gap-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5">
-                <span>{item.icon}</span>
-                <span>{item.name}</span>
-              </span>
-              <span
-                className={`font-medium tabular-nums ${
-                  item.type === "income" ? "text-emerald-600" : "text-zinc-700"
-                }`}
-              >
-                {formatCurrency(item.total, locale)}
-              </span>
-            </div>
-            <div className="h-1.5 rounded-full bg-zinc-100">
-              <div
-                className={`h-full rounded-full ${
-                  item.type === "income" ? "bg-emerald-500" : "bg-rose-400"
-                }`}
-                style={{ width: `${Math.max((item.total / max) * 100, 4)}%` }}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 

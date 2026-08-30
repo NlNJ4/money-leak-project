@@ -32,6 +32,10 @@ const th = {
     categoryBreakdown: "แยกตามหมวด",
     recentTransactions: "รายการล่าสุด",
     addTransaction: "เพิ่มรายการ",
+    charts: {
+      daily: "รายวัน",
+      noData: "ยังไม่มีข้อมูลในช่วงนี้",
+    },
     line: {
       connect: "เชื่อมต่อ LINE",
       instructions: "ส่งโค้ดนี้ไปที่ LINE Bot ของคุณภายใน 15 นาที",
@@ -86,6 +90,10 @@ const en: Dictionary = {
     categoryBreakdown: "By category",
     recentTransactions: "Recent transactions",
     addTransaction: "Add transaction",
+    charts: {
+      daily: "Daily",
+      noData: "No data for this period",
+    },
     line: {
       connect: "Connect LINE",
       instructions: "Send this code to your LINE bot within 15 minutes",
