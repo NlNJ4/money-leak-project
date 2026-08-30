@@ -41,6 +41,7 @@ export type CategoryTotal = {
 export type DashboardData = {
   totals: { income: number; expense: number; net: number };
   byCategory: CategoryTotal[];
+  dailyTotals: { date: string; expense: number }[];
   recent: TransactionRow[];
 };
 
@@ -129,6 +130,7 @@ export async function getDashboardData(
   const parsed = value as unknown as {
     totals: { income: number; expense: number; net: number };
     byCategory: CategoryTotal[];
+    dailyTotals: { date: string; expense: number }[];
   } | null;
 
   const recent = await listTransactions(range, 10);
@@ -136,6 +138,7 @@ export async function getDashboardData(
   return {
     totals: parsed?.totals ?? { income: 0, expense: 0, net: 0 },
     byCategory: parsed?.byCategory ?? [],
+    dailyTotals: parsed?.dailyTotals ?? [],
     recent,
   };
 }
