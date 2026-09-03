@@ -1,6 +1,6 @@
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { isValidISODate, monthRange, todayRange, weekRange } from "@/lib/date";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthContext } from "@/lib/supabase/server";
 import { getDashboardData, listCategories } from "@/lib/transactions";
 
 const PERIODS = ["today", "week", "month", "custom"] as const;
@@ -35,16 +35,10 @@ export default async function DashboardPage({
     }
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const displayName =
-    (user?.user_metadata?.full_name as string | undefined) ??
-    user?.email?.split("@")[0] ??
-    "";
-
-  const [data, categories] = await Promise.all([
+  // Start the static catalog immediately. getDashboardData() shares the same
+  // request-memoized auth promise with the page and dashboard layout.
+  const [auth, data, categories] = await Promise.all([
+    getAuthContext(),
     getDashboardData(range),
     listCategories(),
   ]);
@@ -55,7 +49,7 @@ export default async function DashboardPage({
       categories={categories}
       period={period}
       range={range}
-      displayName={displayName}
+      displayName={auth?.displayName ?? ""}
     />
   );
 }

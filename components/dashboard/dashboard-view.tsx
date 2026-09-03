@@ -1,12 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
 import { useI18n } from "@/lib/i18n/provider";
 import { formatAmountSigned, formatCurrency, formatDate } from "@/lib/format";
-import type { DashboardData } from "@/lib/transactions";
-import type { Category } from "@/lib/transactions";
+import type { Category, DashboardData } from "@/lib/transactions";
 import { AddTransactionForm } from "@/components/dashboard/add-transaction-form";
 import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { DailyChart } from "@/components/dashboard/daily-chart";
@@ -30,10 +30,6 @@ export function DashboardView({
   const { t, locale } = useI18n();
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
-
-  const setPeriod = (next: Period) => {
-    router.push(next === "custom" ? "/dashboard?period=custom" : `/dashboard?period=${next}`);
-  };
 
   const categoryLabel = (c: { name_th: string; name_en: string }) =>
     locale === "th" ? c.name_th : c.name_en;
@@ -119,20 +115,29 @@ export function DashboardView({
               ["month", t.dashboard.period.thisMonth],
               ["custom", t.dashboard.period.custom],
             ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setPeriod(value)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors ${
-                period === value
-                  ? "bg-zinc-900 text-white"
-                  : "border border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+          ).map(([value, label]) => {
+            const href =
+              value === "custom"
+                ? "/dashboard?period=custom"
+                : `/dashboard?period=${value}`;
+
+            return (
+              <Link
+                key={value}
+                href={href}
+                prefetch={true}
+                scroll={false}
+                aria-current={period === value ? "page" : undefined}
+                className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                  period === value
+                    ? "bg-zinc-900 text-white"
+                    : "border border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900"
+                }`}
+              >
+                {label}
+              </Link>
+            );
+          })}
           {period === "custom" && <CustomRange from={range.from} to={range.to} />}
         </section>
 

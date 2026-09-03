@@ -1,6 +1,8 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import { todayISO } from "@/lib/date";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient, getAuthContext } from "@/lib/supabase/server";
 import type {
   CreateTransactionInput,
   TransactionFilterRange,
@@ -46,14 +48,11 @@ export type DashboardData = {
 };
 
 async function requireClient() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const auth = await getAuthContext();
+  if (!auth) {
     throw new ServiceError("unauthorized");
   }
-  return { supabase, userId: user.id };
+  return auth;
 }
 
 const transactionSelect = `
@@ -70,28 +69,41 @@ export type Category = {
   type: string;
 };
 
+const getCachedCategories = unstable_cache(
+  async (): Promise<Category[]> => {
+    // Categories are shared, read-only reference data. The server-only client
+    // lets this cache stay independent of request cookies without exposing the
+    // service key or bypassing RLS for any user-owned data.
+    const supabase = createAdminClient();
+
+    const { data, error } = await supabase
+      .from("categories")
+      .select("id, slug, name_th, name_en, icon, type")
+      .order("type")
+      .order("sort_order");
+
+    if (error) {
+      throw new ServiceError("query_failed", error.message);
+    }
+
+    return (data ?? []) as Category[];
+  },
+  ["dashboard-categories"],
+  { revalidate: 3600, tags: ["categories"] },
+);
+
 export async function listCategories(): Promise<Category[]> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("categories")
-    .select("id, slug, name_th, name_en, icon, type")
-    .order("type")
-    .order("sort_order");
-
-  if (error) {
-    throw new ServiceError("query_failed", error.message);
-  }
-
-  return (data ?? []) as Category[];
+  return getCachedCategories();
 }
 
-export async function listTransactions(
-  range: TransactionFilterRange,
-  limit = 100,
-): Promise<TransactionRow[]> {
-  const { supabase, userId } = await requireClient();
+type ServerClient = Awaited<ReturnType<typeof createClient>>;
 
+async function queryTransactions(
+  supabase: ServerClient,
+  userId: string,
+  range: TransactionFilterRange,
+  limit: number,
+): Promise<TransactionRow[]> {
   const { data, error } = await supabase
     .from("transactions")
     .select(transactionSelect)
@@ -109,17 +121,30 @@ export async function listTransactions(
   return (data ?? []) as unknown as TransactionRow[];
 }
 
+export async function listTransactions(
+  range: TransactionFilterRange,
+  limit = 100,
+): Promise<TransactionRow[]> {
+  const { supabase, userId } = await requireClient();
+  return queryTransactions(supabase, userId, range, limit);
+}
+
 // Totals + breakdown come from a PostgreSQL aggregate (dashboard_summary)
 // so results are exact at any volume; the recent list is a small paged query.
 export async function getDashboardData(
   range: TransactionFilterRange,
 ): Promise<DashboardData> {
-  const { supabase } = await requireClient();
+  const { supabase, userId } = await requireClient();
 
-  const { data: summary, error: summaryError } = await supabase.rpc(
-    "dashboard_summary",
-    { p_from: range.from, p_to: range.to },
-  );
+  const [summaryResult, recent] = await Promise.all([
+    supabase.rpc("dashboard_summary", {
+      p_from: range.from,
+      p_to: range.to,
+    }),
+    queryTransactions(supabase, userId, range, 10),
+  ]);
+
+  const { data: summary, error: summaryError } = summaryResult;
 
   if (summaryError) {
     throw new ServiceError("query_failed", summaryError.message);
@@ -132,8 +157,6 @@ export async function getDashboardData(
     byCategory: CategoryTotal[];
     dailyTotals: { date: string; expense: number }[];
   } | null;
-
-  const recent = await listTransactions(range, 10);
 
   return {
     totals: parsed?.totals ?? { income: 0, expense: 0, net: 0 },
