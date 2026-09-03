@@ -61,11 +61,23 @@ describe("GeminiParser.parseTransaction", () => {
     expect(await new GeminiParser().parseTransaction("สวัสดี")).toBeNull();
   });
 
-  it("returns null on malformed model output instead of saving garbage", async () => {
+  it("falls back when a model returns an incomplete transaction", async () => {
     stubFetchSequence([
       { status: 200, body: geminiBody('{"kind":"transaction","amount":"lots"}') },
+      {
+        status: 200,
+        body: geminiBody(
+          '{"kind":"transaction","type":"expense","amount":120,"category":"food","description":"กินข้าว","date":"2026-08-29"}',
+        ),
+      },
     ]);
-    expect(await new GeminiParser().parseTransaction("กินข้าว 120")).toBeNull();
+    expect(await new GeminiParser().parseTransaction("กินข้าว 120")).toEqual({
+      type: "expense",
+      amount: 120,
+      category: "food",
+      description: "กินข้าว",
+      date: "2026-08-29",
+    });
   });
 
   it("falls back to the secondary model when the primary is overloaded (503)", async () => {
@@ -87,14 +99,32 @@ describe("GeminiParser.parseTransaction", () => {
     expect(secondCallModel).toContain("gemini-3.6-flash");
   });
 
-  it("throws after both models exhaust their retries", async () => {
+  it("throws after all models exhaust their retries", async () => {
     stubFetchSequence([
+      { status: 503, body: {} },
+      { status: 503, body: {} },
       { status: 503, body: {} },
       { status: 503, body: {} },
       { status: 503, body: {} },
       { status: 503, body: {} },
     ]);
     await expect(new GeminiParser().parseTransaction("กินข้าว 120")).rejects.toThrow();
+  });
+
+  it("moves to the next model immediately when free-tier quota returns 429", async () => {
+    const fetchMock = stubFetchSequence([
+      { status: 429, body: { error: "quota" } },
+      {
+        status: 200,
+        body: geminiBody(
+          '{"kind":"transaction","type":"expense","amount":60,"category":"food","description":"กินข้าวเช้า","date":"2026-09-04"}',
+        ),
+      },
+    ]);
+
+    const result = await new GeminiParser().parseTransaction("กินข้าวเช้า 60");
+    expect(result?.amount).toBe(60);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not send the removed temperature parameter to gemini-3 models", async () => {
@@ -108,5 +138,13 @@ describe("GeminiParser.parseTransaction", () => {
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.generationConfig.temperature).toBeUndefined();
     expect(body.generationConfig.responseMimeType).toBe("application/json");
+    expect(body.generationConfig.responseSchema.required).toEqual([
+      "kind",
+      "type",
+      "amount",
+      "category",
+      "description",
+      "date",
+    ]);
   });
 });

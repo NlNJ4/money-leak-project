@@ -7,22 +7,27 @@ import type {
   TransactionParser,
 } from "@/lib/ai/provider";
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
-// Used when the primary model is rate-limited or overloaded (429/5xx).
-// Set GEMINI_FALLBACK_MODEL="" to disable. Note: gemini-2.5* is retired for
-// new API keys, so pick a fallback the key can actually serve.
-const DEFAULT_FALLBACK_MODEL = "gemini-3.6-flash";
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503]);
+const DEFAULT_MODEL = "gemini-3.7-flash";
+// Kept as a final low-latency fallback even when GEMINI_FALLBACK_MODEL is set.
+// This parser is a small extraction task, so Flash-Lite is a better emergency
+// option than waiting on another reasoning-heavy model during capacity spikes.
+const DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite";
+const RETRYABLE_STATUS = new Set([500, 502, 503]);
+const REQUEST_TIMEOUT_MS = 8_000;
+const RETRY_DELAY_MS = 300;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const responseSchema = z.object({
-  kind: z.enum(["transaction", "unknown"]),
-  type: z.enum(["income", "expense"]).optional(),
-  amount: z.number().positive().optional(),
-  category: z.enum(CATEGORY_SLUGS).optional(),
-  description: z.string().optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-});
+const responseSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("unknown") }),
+  z.object({
+    kind: z.literal("transaction"),
+    type: z.enum(["income", "expense"]),
+    amount: z.number().positive(),
+    category: z.enum(CATEGORY_SLUGS),
+    description: z.string(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }),
+]);
 
 function buildPrompt(text: string): string {
   // Bangkok wall-clock "today", so relative dates resolve correctly on UTC
@@ -33,7 +38,8 @@ function buildPrompt(text: string): string {
   return `คุณคือผู้ช่วยบันทึกรายรับรายจ่าย จงแปลงข้อความภาษาไทยหรืออังกฤษเป็นข้อมูลธุรกรรม
 
 กฎ:
-- ถ้าข้อความไม่ใช่การบันทึกรายรับหรือรายจ่าย ให้ตอบ {"kind":"unknown"}
+- ต้องตอบครบทั้ง 6 fields: kind, type, amount, category, description, date
+- ถ้าข้อความไม่ใช่การบันทึกรายรับหรือรายจ่าย ให้ตอบ {"kind":"unknown","type":"expense","amount":0,"category":"other","description":"","date":"${todayISO}"}
 - amount ต้องเป็นตัวเลข ไม่มีสัญลักษณ์สกุลเงิน
 - type: "expense" ถ้าเป็นการใช้เงิน, "income" ถ้าเป็นการได้รับเงิน (ได้เงิน, รับเงิน, ขายของ, เงินเดือน)
 - category ต้องเลือกจากรายการนี้เท่านั้น:
@@ -62,8 +68,14 @@ export class GeminiParser implements TransactionParser {
     }
 
     const primary = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-    const fallback = process.env.GEMINI_FALLBACK_MODEL ?? DEFAULT_FALLBACK_MODEL;
-    const models = [...new Set([primary, fallback].filter(Boolean))];
+    const configuredFallback = process.env.GEMINI_FALLBACK_MODEL;
+    const models = [
+      ...new Set(
+        [primary, configuredFallback, DEFAULT_FALLBACK_MODEL].filter(
+          (model): model is string => Boolean(model),
+        ),
+      ),
+    ];
 
     let lastError: unknown;
     for (const model of models) {
@@ -85,13 +97,13 @@ export class GeminiParser implements TransactionParser {
     text: string,
   ): Promise<ParsedTransaction | null> {
     const apiKey = process.env.GEMINI_API_KEY!;
-    // Keep the whole parse (retries + fallback) well inside LINE's reply-token
-    // window: 2 attempts x 12s per model, ~50s worst case across both models.
+    // Bound each model so a congested endpoint cannot consume LINE's entire
+    // reply-token window before the low-latency fallback gets a chance.
     let response: Response | undefined;
 
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) {
-        await sleep(1500);
+        await sleep(RETRY_DELAY_MS);
       }
       response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -101,7 +113,7 @@ export class GeminiParser implements TransactionParser {
             "Content-Type": "application/json",
             "x-goog-api-key": apiKey,
           },
-          signal: AbortSignal.timeout(12_000),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           body: JSON.stringify({
             contents: [{ parts: [{ text: buildPrompt(text) }] }],
             generationConfig: {
@@ -119,7 +131,14 @@ export class GeminiParser implements TransactionParser {
                   description: { type: "string" },
                   date: { type: "string" },
                 },
-                required: ["kind"],
+                required: [
+                  "kind",
+                  "type",
+                  "amount",
+                  "category",
+                  "description",
+                  "date",
+                ],
               },
             },
           }),
@@ -143,22 +162,23 @@ export class GeminiParser implements TransactionParser {
       return null;
     }
 
-    // Never trust the model output — validate shape, amount and category.
+    // Never trust the model output. Invalid structured output is a provider
+    // failure, not an "unknown" user message, so let parseTransaction try the
+    // next model instead of returning a misleading help response.
     const parsed = responseSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success || parsed.data.kind !== "transaction") {
-      console.warn("[gemini] rejected model output:", raw.slice(0, 300));
+    if (!parsed.success) {
+      throw new Error(`Gemini returned invalid structured output: ${raw.slice(0, 300)}`);
+    }
+    if (parsed.data.kind === "unknown") {
       return null;
     }
     const d = parsed.data;
-    if (!d.type || !d.amount || !d.category || !d.date) {
-      return null;
-    }
 
     return {
       type: d.type,
       amount: d.amount,
       category: d.category,
-      description: d.description?.trim() || d.category,
+      description: d.description.trim() || d.category,
       date: d.date,
     };
   }
