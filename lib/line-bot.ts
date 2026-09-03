@@ -1,5 +1,5 @@
 import "server-only";
-import { GeminiParser } from "@/lib/ai/gemini";
+import { parseTransaction } from "@/lib/ai/pipeline";
 import type { ParsedTransaction } from "@/lib/ai/provider";
 import { monthRange, todayISO } from "@/lib/date";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -298,9 +298,10 @@ export async function handleLineMessage(
 
   let parsed: ParsedTransaction | null = null;
   try {
-    parsed = await new GeminiParser().parseTransaction(trimmed);
+    // Rule parser first, Gemini only when the rules are unsure.
+    parsed = await parseTransaction(trimmed);
   } catch (err) {
-    console.error("[line-bot] gemini parse failed:", err);
+    console.error("[line-bot] parse failed:", err);
     return "เกิดข้อผิดพลาดในการวิเคราะห์ครับ ลองส่งใหม่อีกครั้งนะครับ";
   }
 
