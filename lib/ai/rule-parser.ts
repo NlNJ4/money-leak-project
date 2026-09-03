@@ -163,7 +163,7 @@ export function parseWithConfidence(text: string): RuleParseResult {
 
   const fallback: CategorySlug = type === "income" ? "other_income" : "other";
   const table = type === "income" ? INCOME_KEYWORDS : EXPENSE_KEYWORDS;
-  let category = fallback;
+  let category: CategorySlug = fallback;
   let matched = false;
   for (const [slug, words] of table) {
     if (words.some((word) => scrubbed.includes(word))) {
