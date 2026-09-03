@@ -142,15 +142,69 @@ export type Database = {
         }
         Relationships: []
       }
+      line_jobs: {
+        Row: {
+          id: string
+          line_user_id: string
+          reply_token: string
+          text: string
+          status: string
+          attempts: number
+          next_retry_at: string
+          claimed_at: string | null
+          last_error: string | null
+          received_at: string
+          processed_at: string | null
+        }
+        Insert: {
+          id: string
+          line_user_id: string
+          reply_token: string
+          text: string
+          status?: string
+          attempts?: number
+          next_retry_at?: string
+          claimed_at?: string | null
+          last_error?: string | null
+          received_at?: string
+          processed_at?: string | null
+        }
+        Update: {
+          id?: string
+          line_user_id?: string
+          reply_token?: string
+          text?: string
+          status?: string
+          attempts?: number
+          next_retry_at?: string
+          claimed_at?: string | null
+          last_error?: string | null
+          received_at?: string
+          processed_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      claim_due_line_jobs: {
+        Args: {
+          p_limit: number
+        }
+        Returns: line_jobs[]
+      }
       dashboard_summary: {
         Args: {
           p_from: string
           p_to: string
+        }
+        Returns: Json
+      }
+      delete_latest_line_transaction: {
+        Args: {
+          p_line_user_id: string
         }
         Returns: Json
       }
@@ -189,3 +243,5 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+export type line_jobs = Database["public"]["Tables"]["line_jobs"]["Row"]
