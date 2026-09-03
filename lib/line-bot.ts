@@ -11,6 +11,10 @@ function fmt(n: number): string {
 
 const LINK_CODE_RE = /^money-([A-Za-z0-9_-]{22})$/i;
 
+// Undo commands, matched after collapsing whitespace so spacing variations
+// ("ลบ ล่าสุด", "ยกเลิกรายการล่าสุด") all work.
+const UNDO_RE = /^(?:ยกเลิก|ลบ)(?:รายการ)?ล่าสุด$/;
+
 // Brute-force guard for code redemption: 5 attempts per LINE user per hour.
 // In-memory is per server instance; acceptable for a single-user MVP, but a
 // shared store (e.g. a Postgres counter) is needed for multi-instance deploys.
@@ -40,6 +44,8 @@ const HELP_TEXT = [
   "",
   "ดูสรุป:",
   "วันนี้ • เดือนนี้ • ล่าสุด",
+  "",
+  "พิมพ์ผิด? พิมพ์ ลบล่าสุด เพื่อลบรายการล่าสุดครับ",
 ].join("\n");
 
 const NOT_LINKED_TEXT = [
@@ -201,6 +207,46 @@ async function recentText(userId: string): Promise<string> {
   return ["🕘 ล่าสุด", "", ...lines].join("\n");
 }
 
+// ---- undo (delete latest transaction) ----
+
+type UndoResult = {
+  status: string;
+  type?: string;
+  amount?: number | string;
+  description?: string;
+  icon?: string;
+  name?: string;
+};
+
+// One atomic RPC: locks the newest transaction and deletes it, so two
+// rapid-fire undo commands can never remove two rows.
+async function undoLatest(lineUserId: string): Promise<string> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("delete_latest_line_transaction", {
+    p_line_user_id: lineUserId,
+  });
+
+  if (error || !data) {
+    console.error("[line-bot] undo failed:", error?.message);
+    return "ลบไม่สำเร็จครับ ลองใหม่อีกครั้งนะครับ";
+  }
+
+  const result = data as UndoResult;
+  if (result.status === "not_linked") {
+    return NOT_LINKED_TEXT;
+  }
+  if (result.status !== "deleted") {
+    return "ยังไม่มีรายการให้ลบครับ";
+  }
+
+  return [
+    "🗑 ลบรายการล่าสุดแล้ว",
+    "",
+    `${result.icon ?? "📦"} ${result.name ?? ""}${result.description ? ` · ${result.description}` : ""}`,
+    `${fmt(Number(result.amount ?? 0))} บาท`,
+  ].join("\n");
+}
+
 // ---- AI save flow ----
 
 async function saveTransaction(
@@ -291,6 +337,9 @@ export async function handleLineMessage(
   }
   if (trimmed === "ล่าสุด") {
     return recentText(userId);
+  }
+  if (UNDO_RE.test(trimmed.replace(/\s+/g, ""))) {
+    return undoLatest(lineUserId);
   }
   if (trimmed === "ช่วย" || trimmed.toLowerCase() === "help") {
     return HELP_TEXT;
