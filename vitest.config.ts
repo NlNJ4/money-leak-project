@@ -31,6 +31,9 @@ export default defineConfig({
           environment: "node",
           include: ["test-integration/**/*.test.ts"],
           setupFiles: ["test-integration/setup.ts"],
+          globalSetup: ["test-integration/global-setup.ts"],
+          // Files share one throwaway database — run them sequentially.
+          fileParallelism: false,
           testTimeout: 30_000,
           hookTimeout: 60_000,
         },
