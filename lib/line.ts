@@ -1,9 +1,14 @@
 import "server-only";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
-const LINE_API_BASE = "https://api.line.me/v2/bot";
+// Read at call time so tests can point the client at a local mock.
+function lineApiBase(): string {
+  return process.env.LINE_API_BASE_URL ?? "https://api.line.me/v2/bot";
+}
 // Bounded so a hung LINE call cannot consume the sweep's function budget.
-const LINE_TIMEOUT_MS = 10_000;
+function lineTimeoutMs(): number {
+  return Number(process.env.LINE_TIMEOUT_MS) || 10_000;
+}
 
 export type LineMessageEvent = {
   type: "message";
@@ -92,7 +97,7 @@ async function postToLine(
     throw new Error("LINE_CHANNEL_ACCESS_TOKEN is not configured");
   }
 
-  const response = await fetch(`${LINE_API_BASE}${path}`, {
+  const response = await fetch(`${lineApiBase()}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -101,7 +106,7 @@ async function postToLine(
       // idempotent on their side.
       ...(retryKey ? { "X-Line-Retry-Key": retryKey } : {}),
     },
-    signal: AbortSignal.timeout(LINE_TIMEOUT_MS),
+    signal: AbortSignal.timeout(lineTimeoutMs()),
     body: JSON.stringify(payload),
   });
 

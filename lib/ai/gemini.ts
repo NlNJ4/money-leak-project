@@ -17,8 +17,14 @@ const DEFAULT_MODEL = "gemini-3.7-flash";
 // option than waiting on another reasoning-heavy model during capacity spikes.
 const DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const RETRYABLE_STATUS = new Set([500, 502, 503]);
-const REQUEST_TIMEOUT_MS = 8_000;
 const RETRY_DELAY_MS = 300;
+// Read at call time so tests can point the parser at a local mock.
+function geminiBaseUrl(): string {
+  return process.env.GEMINI_BASE_URL ?? "https://generativelanguage.googleapis.com";
+}
+function requestTimeoutMs(): number {
+  return Number(process.env.GEMINI_TIMEOUT_MS) || 8_000;
+}
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const responseSchema = z.discriminatedUnion("kind", [
@@ -140,14 +146,14 @@ export class GeminiParser implements TransactionParser {
         await sleep(RETRY_DELAY_MS);
       }
       response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        `${geminiBaseUrl()}/v1beta/models/${model}:generateContent`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "x-goog-api-key": apiKey,
           },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(requestTimeoutMs()),
           body: JSON.stringify({
             contents: [{ parts: [{ text: buildPrompt(text) }] }],
             generationConfig: {
