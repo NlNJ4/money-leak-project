@@ -9,7 +9,7 @@ A bilingual (Thai/English) personal finance tracker: a Next.js web dashboard plu
 - **LINE Messaging API** — signature-verified webhook, durable job queue
 - **Gemini API** — fallback parser behind a local rule-based parser
 - **Vercel** — git-linked production deploys; **Supabase pg_cron** — every-minute worker sweep
-- **Vitest** — 76 unit tests; **GitHub Actions** — lint / typecheck / test / build on every push
+- **Vitest** — 83 unit tests; **GitHub Actions** — lint / typecheck / test / build on every push
 
 ## Environment variables
 
@@ -96,7 +96,7 @@ $$);
 app/            routes: dashboard, history, auth, api (transactions, line webhook/link/disconnect/worker)
 components/     dashboard charts, forms, history view, i18n toggle
 lib/            transactions service, LINE bot + queue, parser pipeline, date/validation/i18n
-supabase/       ordered SQL migrations (13 so far)
+supabase/       ordered SQL migrations (14 so far)
 test/           vitest suites (dates, validation, redirect, signatures, parser corpus, pipeline)
 ```
 

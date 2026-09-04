@@ -20,6 +20,9 @@ export async function GET(request: NextRequest) {
   }
 
   const cursor = parseHistoryCursor(params.cursor);
+  if (params.cursor && !cursor) {
+    return NextResponse.json({ error: "invalid_cursor" }, { status: 400 });
+  }
 
   try {
     const page = await listHistory(

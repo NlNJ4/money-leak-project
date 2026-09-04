@@ -15,10 +15,10 @@ const DEAD_RETENTION_DAYS = 2;
 // attempts² × 30s, capped: 30s, 2m, 4.5m, 8m → dead.
 const BACKOFF_BASE_MS = 30_000;
 const BACKOFF_CAP_MS = 15 * 60 * 1000;
-// Small claims + wall-clock budget: a sweep must finish inside the hosting
-// function duration even when every job hits the full Gemini timeout chain,
-// and unstarted jobs must never be left with burned attempt counters.
-const CLAIM_BATCH = 3;
+// Process at most a few jobs per invocation, but claim only one at a time.
+// A sequential worker must not burn attempts on jobs it has not started when
+// an earlier Gemini request consumes the function's wall-clock budget.
+const MAX_JOBS_PER_SWEEP = 3;
 const SWEEP_BUDGET_MS = 40_000;
 
 type LineJobRow = {
@@ -73,15 +73,19 @@ export async function enqueueLineJobs(
 // Everything not claimed keeps its attempt counter untouched; the next
 // sweep (every minute) picks it up.
 export async function processDueLineJobs(
-  limit = CLAIM_BATCH,
+  limit = MAX_JOBS_PER_SWEEP,
 ): Promise<number> {
   const admin = createAdminClient();
   const deadline = Date.now() + SWEEP_BUDGET_MS;
+  const maxJobs = Math.max(1, Math.floor(limit));
   let processed = 0;
 
-  for (;;) {
+  while (processed < maxJobs && Date.now() < deadline) {
+    // Claim exactly the job we are about to run. Claiming a batch here would
+    // increment attempts and mark later rows as processing even though this
+    // worker executes them sequentially and may time out first.
     const { data, error } = await admin.rpc("claim_due_line_jobs", {
-      p_limit: limit,
+      p_limit: 1,
     });
 
     if (error) {
@@ -91,12 +95,8 @@ export async function processDueLineJobs(
     const jobs = (data ?? []) as LineJobRow[];
     if (jobs.length === 0) break;
 
-    for (const job of jobs) {
-      await runJob(job);
-      processed += 1;
-    }
-
-    if (Date.now() >= deadline) break;
+    await runJob(jobs[0]);
+    processed += 1;
   }
 
   return processed;
@@ -132,15 +132,15 @@ async function runJob(job: LineJobRow): Promise<void> {
   // One stable retry key per job: LINE deduplicates on it, so a re-sent
   // push after an ambiguous timeout cannot deliver twice (409 = already
   // accepted).
-  const retryKey = lineRetryKey(job.id);
-
   try {
     if (job.attempts <= 1 && job.reply_token) {
-      await replyToUser(job.reply_token, reply, retryKey);
+      // LINE reply messages do not support X-Line-Retry-Key. Including it
+      // makes the reply endpoint reject the request with HTTP 400.
+      await replyToUser(job.reply_token, reply);
     } else {
       // Retry-time replies push instead: the reply token is single-use and
       // long expired by now.
-      await pushToUser(job.line_user_id, reply, retryKey);
+      await pushToUser(job.line_user_id, reply, lineRetryKey(job.id));
     }
   } catch (err) {
     console.error("[line-jobs] delivery failed:", job.id, err);

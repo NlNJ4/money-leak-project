@@ -1,6 +1,6 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
-import { todayISO } from "@/lib/date";
+import { isValidISODate, todayISO } from "@/lib/date";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient, getAuthContext } from "@/lib/supabase/server";
 import type {
@@ -105,15 +105,32 @@ export type HistoryCursor = { createdAt: string; id: string };
 // Cursor strings come from URLs, so both halves are strictly validated
 // before they can reach a Postgres filter.
 const ISO_DATETIME_RE =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/;
 
 export function parseHistoryCursor(
   raw: string | undefined | null,
 ): HistoryCursor | undefined {
   if (!raw) return undefined;
-  const [createdAt, id] = raw.split("|");
-  if (!createdAt || !id) return undefined;
-  if (!ISO_DATETIME_RE.test(createdAt)) return undefined;
+  const parts = raw.split("|");
+  if (parts.length !== 2) return undefined;
+  const [createdAt, id] = parts;
+  const match = ISO_DATETIME_RE.exec(createdAt);
+  if (!match || !isValidISODate(match[1])) return undefined;
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  const second = Number(match[4]);
+  const offsetHour = match[7] === undefined ? 0 : Number(match[7]);
+  const offsetMinute = match[8] === undefined ? 0 : Number(match[8]);
+  if (
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    offsetHour > 14 ||
+    offsetMinute > 59 ||
+    Number.isNaN(Date.parse(createdAt))
+  ) {
+    return undefined;
+  }
   if (!idParamSchema.safeParse(id).success) return undefined;
   return { createdAt, id };
 }

@@ -1,17 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handleServiceError } from "@/app/api/transactions/http";
-import {
-  listHistory,
-  parseHistoryCursor,
-} from "@/lib/transactions";
+import { collectHistoryRows } from "@/lib/history-export";
+import { listHistory } from "@/lib/transactions";
 import { historyFilterSchema } from "@/lib/validation";
 
 // CSV export of the same filtered view the history page shows. Rows are
 // fetched cursor-page by cursor-page: hosted Supabase caps a single request
 // at 1000 rows, so one big request would silently omit records.
-const MAX_EXPORT_ROWS = 5000;
-const PAGE_SIZE = 1000;
-
 function csvCell(value: string | number | null | undefined): string {
   const text = String(value ?? "");
   if (/[",\n]/.test(text)) {
@@ -39,13 +34,9 @@ export async function GET(request: NextRequest) {
       q: parsed.data.q,
     };
 
-    const all = [];
-    let cursor = parseHistoryCursor(params.cursor);
-    do {
-      const page = await listHistory(filters, cursor, PAGE_SIZE);
-      all.push(...page.rows);
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor && all.length < MAX_EXPORT_ROWS);
+    const all = await collectHistoryRows((cursor, limit) =>
+      listHistory(filters, cursor, limit),
+    );
 
     const header = ["date", "type", "category", "description", "amount", "source"];
     const lines = [header.join(",")];
