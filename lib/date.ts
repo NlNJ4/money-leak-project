@@ -53,3 +53,10 @@ export function monthRange(date = new Date(), tz: string = APP_TIMEZONE): Range 
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return { from: `${year}-${pad(month)}-01`, to: `${year}-${pad(month)}-${pad(lastDay)}` };
 }
+
+// Default history window: the trailing year, ending today.
+export function yearAgoRange(): Range {
+  const to = todayISO();
+  const from = toISODate(new Date(Date.now() - 365 * 86_400_000));
+  return { from, to };
+}

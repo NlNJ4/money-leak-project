@@ -35,6 +35,17 @@ export function CategoryDonut({
       fill: PALETTE[index % PALETTE.length],
     }));
 
+  // Screen-reader summary: total plus the top slices, so the chart is not
+  // color-only information.
+  const top = [...expenses]
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 3)
+    .map((c) => {
+      const share = total > 0 ? Math.round((c.total / total) * 100) : 0;
+      return `${c.name} ${share}%`;
+    })
+    .join(", ");
+
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <h2 className="text-sm font-medium">{t.dashboard.categoryBreakdown}</h2>
@@ -45,7 +56,11 @@ export function CategoryDonut({
         </p>
       ) : (
         <div className="mt-2 flex flex-col items-center gap-4 sm:flex-row">
-          <div className="relative h-44 w-44 shrink-0">
+          <div
+            className="relative h-44 w-44 shrink-0"
+            role="img"
+            aria-label={`${t.dashboard.expense}: ${formatCurrency(total, locale)}${top ? ` — ${top}` : ""}`}
+          >
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie

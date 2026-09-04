@@ -76,6 +76,13 @@ export function DashboardView({
             <span className="text-sm">{t.appName}</span>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              href="/history"
+              prefetch
+              className="text-xs text-zinc-500 hover:text-zinc-900"
+            >
+              {t.history.title}
+            </Link>
             <LanguageToggle />
             <form action="/auth/signout" method="post">
               <button

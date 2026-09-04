@@ -14,6 +14,23 @@ const th = {
   nav: {
     signOut: "ออกจากระบบ",
   },
+  errors: {
+    generic: "เกิดข้อผิดพลาดในการโหลดข้อมูล",
+    retry: "ลองอีกครั้ง",
+  },
+  history: {
+    title: "ประวัติรายการ",
+    type: "ประเภท",
+    source: "ที่มา",
+    sourceWeb: "เว็บ",
+    sourceLine: "LINE",
+    all: "ทั้งหมด",
+    search: "ค้นหารายละเอียด",
+    searchPlaceholder: "เช่น กาแฟ, ค่าไฟ",
+    export: "ส่งออก CSV",
+    loadMore: "โหลดเพิ่ม",
+    noMore: "ไม่มีรายการเพิ่มเติมแล้ว",
+  },
   dashboard: {
     title: "ภาพรวม",
     greeting: "สวัสดี",
@@ -78,6 +95,23 @@ const en: Dictionary = {
   },
   nav: {
     signOut: "Sign out",
+  },
+  errors: {
+    generic: "Something went wrong while loading data",
+    retry: "Try again",
+  },
+  history: {
+    title: "Transaction history",
+    type: "Type",
+    source: "Source",
+    sourceWeb: "Web",
+    sourceLine: "LINE",
+    all: "All",
+    search: "Search description",
+    searchPlaceholder: "e.g. coffee, electricity",
+    export: "Export CSV",
+    loadMore: "Load more",
+    noMore: "No more transactions",
   },
   dashboard: {
     title: "Overview",

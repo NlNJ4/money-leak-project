@@ -40,3 +40,15 @@ export const transactionFilterSchema = z
   );
 
 export type TransactionFilterRange = z.infer<typeof transactionFilterSchema>;
+
+// History page + CSV export filters: the date range plus optional facets.
+export const historyFilterSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  type: z.enum(["income", "expense"]).optional(),
+  category: z.enum(CATEGORY_SLUGS).optional(),
+  source: z.enum(["web", "line", "receipt"]).optional(),
+  q: z.string().trim().max(100).optional(),
+});
+
+export type HistoryFilterInput = z.infer<typeof historyFilterSchema>;

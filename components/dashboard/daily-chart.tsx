@@ -24,6 +24,11 @@ export function DailyChart({
     day: Number(d.date.slice(8, 10)),
   }));
 
+  const maxDay = data.reduce(
+    (best, d) => (d.expense > best.expense ? d : best),
+    { date: "", expense: 0 },
+  );
+
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <h2 className="text-sm font-medium">
@@ -34,7 +39,15 @@ export function DailyChart({
           {t.dashboard.charts.noData}
         </p>
       ) : (
-        <div className="mt-3 h-44">
+        <div
+          className="mt-3 h-44"
+          role="img"
+          aria-label={`${t.dashboard.charts.daily} · ${t.dashboard.expense}${
+            maxDay.expense > 0
+              ? ` — ${maxDay.date}: ${formatCurrency(maxDay.expense, locale)}`
+              : ""
+          }`}
+        >
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
               <CartesianGrid vertical={false} stroke="#f4f4f5" />
