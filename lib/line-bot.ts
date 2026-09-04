@@ -92,8 +92,8 @@ export async function linkByCode(
   });
 
   if (error) {
-    console.error("[line-bot] redeem failed:", error.message);
-    return "เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้งครับ";
+    // Database-level failure: propagate so the queue retries the job.
+    throw new Error(`redeem_linking_code failed: ${error.message}`);
   }
 
   switch (status) {
@@ -227,8 +227,8 @@ async function undoLatest(lineUserId: string): Promise<string> {
   });
 
   if (error || !data) {
-    console.error("[line-bot] undo failed:", error?.message);
-    return "ลบไม่สำเร็จครับ ลองใหม่อีกครั้งนะครับ";
+    // Database-level failure: propagate so the queue retries the job.
+    throw new Error(`delete_latest_line_transaction failed: ${error?.message ?? "no result"}`);
   }
 
   const result = data as UndoResult;
@@ -270,8 +270,8 @@ async function saveTransaction(
   });
 
   if (error) {
-    console.error("[line-bot] save failed:", error.message);
-    return "บันทึกไม่สำเร็จครับ ลองใหม่อีกครั้งนะครับ";
+    // Database-level failure: propagate so the queue retries the job.
+    throw new Error(`save_line_transaction failed: ${error.message}`);
   }
   if (status === "duplicate") {
     return "รายการนี้บันทึกไปแล้วครับ ✅";
@@ -345,14 +345,10 @@ export async function handleLineMessage(
     return HELP_TEXT;
   }
 
-  let parsed: ParsedTransaction | null = null;
-  try {
-    // Rule parser first, Gemini only when the rules are unsure.
-    parsed = await parseTransaction(trimmed);
-  } catch (err) {
-    console.error("[line-bot] parse failed:", err);
-    return "เกิดข้อผิดพลาดในการวิเคราะห์ครับ ลองส่งใหม่อีกครั้งนะครับ";
-  }
+  // Provider/network failures propagate so the queue retries the job; a
+  // definitive null (text is not a transaction) is a permanent outcome and
+  // becomes a user-facing reply below.
+  const parsed = await parseTransaction(trimmed);
 
   if (!parsed) {
     return "ไม่เข้าใจข้อความครับ ลองแบบนี้ดู: กินข้าว 120 หรือพิมพ์ ช่วย เพื่อดูตัวอย่าง";

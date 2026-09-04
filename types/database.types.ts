@@ -146,8 +146,8 @@ export type Database = {
         Row: {
           id: string
           line_user_id: string
-          reply_token: string
-          text: string
+          reply_token: string | null
+          text: string | null
           status: string
           attempts: number
           next_retry_at: string
@@ -155,6 +155,7 @@ export type Database = {
           last_error: string | null
           received_at: string
           processed_at: string | null
+          reply_text: string | null
         }
         Insert: {
           id: string
@@ -168,12 +169,13 @@ export type Database = {
           last_error?: string | null
           received_at?: string
           processed_at?: string | null
+          reply_text?: string | null
         }
         Update: {
           id?: string
           line_user_id?: string
-          reply_token?: string
-          text?: string
+          reply_token?: string | null
+          text?: string | null
           status?: string
           attempts?: number
           next_retry_at?: string
@@ -181,6 +183,37 @@ export type Database = {
           last_error?: string | null
           received_at?: string
           processed_at?: string | null
+          reply_text?: string | null
+        }
+        Relationships: []
+      }
+      line_worker_tokens: {
+        Row: {
+          token: string
+          created_at: string
+        }
+        Insert: {
+          token: string
+          created_at?: string
+        }
+        Update: {
+          token?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      webhook_events: {
+        Row: {
+          id: string
+          received_at: string
+        }
+        Insert: {
+          id: string
+          received_at?: string
+        }
+        Update: {
+          id?: string
+          received_at?: string
         }
         Relationships: []
       }
