@@ -7,6 +7,10 @@ import {
 } from "@/lib/line";
 import { enqueueLineJobs, processDueLineJobs } from "@/lib/line-jobs";
 
+// after() processing must also fit the function budget (see line-jobs
+// SWEEP_BUDGET_MS).
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const secret = process.env.LINE_CHANNEL_SECRET;
   const raw = await request.text();
@@ -38,6 +42,10 @@ export async function POST(request: NextRequest) {
       lineUserId: event.source.userId ?? "",
       replyToken: event.replyToken,
       text: event.message.text ?? "",
+      // Ordering data: the queue never lets a later message from the same
+      // user run ahead of this one.
+      lineTimestamp: event.timestamp ?? 0,
+      batchSeq: index,
     }));
 
   // Persist durably BEFORE acknowledging. If this write fails we answer 500

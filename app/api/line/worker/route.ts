@@ -6,6 +6,9 @@ import {
   processDueLineJobs,
 } from "@/lib/line-jobs";
 
+// Match the sweep budget inside line-jobs so the function always finishes.
+export const maxDuration = 60;
+
 // Scheduled retry sweep, hit every minute by Supabase pg_cron (Vercel
 // Hobby cron is daily-only). This is what makes retries run even when no
 // new LINE message arrives. Auth is a token generated in-database —

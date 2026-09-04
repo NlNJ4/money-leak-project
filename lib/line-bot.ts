@@ -87,6 +87,7 @@ async function resolveUserId(
 export async function linkByCode(
   lineUserId: string,
   code: string,
+  commandKey = "",
 ): Promise<string> {
   const admin = createAdminClient();
 
@@ -95,6 +96,7 @@ export async function linkByCode(
   }
 
   const { data: status, error } = await admin.rpc("redeem_linking_code", {
+    p_event_key: commandKey,
     p_code: code,
     p_provider: "line",
     p_provider_user_id: lineUserId,
@@ -112,6 +114,8 @@ export async function linkByCode(
       return "บัญชีนี้เชื่อมต่อไว้แล้วครับ ✅";
     case "already_linked_other":
       return "LINE นี้ถูกเชื่อมต่อกับบัญชีอื่นอยู่แล้วครับ";
+    case "user_already_linked":
+      return "บัญชีเว็บนี้เชื่อมต่อกับ LINE อื่นอยู่แล้วครับ";
     case "expired":
       return "โค้ดนี้หมดอายุแล้วครับ กดขอโค้ดใหม่ในหน้าแดชบอร์ดได้เลยครับ";
     default:
@@ -123,25 +127,44 @@ export async function linkByCode(
 
 type Range = { from: string; to: string };
 
-async function rangeRows(
+type SummaryCategory = {
+  type: string;
+  icon: string;
+  name: string;
+  total: number;
+};
+
+// Aggregation happens in SQL (line_range_summary) — fetching rows and
+// summing in JavaScript silently undercounts past the hosted 1000-row
+// limit.
+async function rangeSummary(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
   range: Range,
-) {
-  const { data, error } = await admin
-    .from("transactions")
-    .select(
-      "type, amount, transaction_date, category:categories(icon, name_th)",
-    )
-    .eq("user_id", userId)
-    .gte("transaction_date", range.from)
-    .lte("transaction_date", range.to)
-    .order("transaction_date", { ascending: false });
+): Promise<{ income: number; expense: number; categories: SummaryCategory[] }> {
+  const { data, error } = await admin.rpc("line_range_summary", {
+    p_user_id: userId,
+    p_from: range.from,
+    p_to: range.to,
+  });
+
   if (error) {
     // Never answer with a believable ฿0 summary on a database failure.
     throw new Error(`summary query failed: ${error.message}`);
   }
-  return data ?? [];
+
+  const value = Array.isArray(data) ? data[0] : data;
+  const parsed = value as unknown as {
+    income?: number | string;
+    expense?: number | string;
+    categories?: SummaryCategory[];
+  } | null;
+
+  return {
+    income: Number(parsed?.income ?? 0),
+    expense: Number(parsed?.expense ?? 0),
+    categories: parsed?.categories ?? [],
+  };
 }
 
 async function summaryForRange(
@@ -150,24 +173,8 @@ async function summaryForRange(
   title: string,
 ): Promise<string> {
   const admin = createAdminClient();
-  const rows = await rangeRows(admin, userId, range);
-
-  let income = 0;
-  let expense = 0;
-  const byCategory = new Map<string, { icon: string; name: string; total: number }>();
-
-  for (const row of rows) {
-    const amount = Number(row.amount);
-    if (row.type === "income") income += amount;
-    else if (row.type === "expense") expense += amount;
-    if (row.type !== "transfer" && row.category) {
-      const cat = row.category as { icon: string; name_th: string };
-      const key = `${row.type}:${cat.name_th}`;
-      const entry = byCategory.get(key);
-      if (entry) entry.total += amount;
-      else byCategory.set(key, { icon: cat.icon, name: cat.name_th, total: amount });
-    }
-  }
+  const summary = await rangeSummary(admin, userId, range);
+  const { income, expense } = summary;
 
   const lines = [
     `📅 ${title}`,
@@ -178,13 +185,13 @@ async function summaryForRange(
     `สุทธิ      ${income - expense >= 0 ? "+" : "-"}฿${fmt(Math.abs(income - expense))}`,
   ];
 
-  const expenseCats = [...byCategory.entries()]
-    .filter(([key]) => key.startsWith("expense:"))
-    .sort((a, b) => b[1].total - a[1].total);
+  const expenseCats = summary.categories
+    .filter((cat) => cat.type === "expense")
+    .sort((a, b) => b.total - a.total);
   if (expenseCats.length > 0) {
     lines.push("", "รายจ่าย", "");
-    for (const [, cat] of expenseCats) {
-      lines.push(`${cat.icon} ${cat.name}  ฿${fmt(cat.total)}`);
+    for (const cat of expenseCats) {
+      lines.push(`${cat.icon} ${cat.name}  ฿${fmt(Number(cat.total))}`);
     }
   }
 
@@ -229,9 +236,13 @@ type UndoResult = {
 
 // One atomic RPC: locks the newest transaction and deletes it, so two
 // rapid-fire undo commands can never remove two rows.
-async function undoLatest(lineUserId: string): Promise<string> {
+async function undoLatest(
+  lineUserId: string,
+  commandKey: string,
+): Promise<string> {
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("delete_latest_line_transaction", {
+    p_event_key: commandKey,
     p_line_user_id: lineUserId,
   });
 
@@ -258,9 +269,13 @@ async function undoLatest(lineUserId: string): Promise<string> {
   ].join("\n");
 }
 
-async function restoreLatest(lineUserId: string): Promise<string> {
+async function restoreLatest(
+  lineUserId: string,
+  commandKey: string,
+): Promise<string> {
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("restore_latest_line_transaction", {
+    p_event_key: commandKey,
     p_line_user_id: lineUserId,
   });
 
@@ -289,9 +304,11 @@ async function restoreLatest(lineUserId: string): Promise<string> {
 async function updateLatestAmount(
   lineUserId: string,
   amount: number,
+  commandKey: string,
 ): Promise<string> {
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("update_latest_line_transaction_amount", {
+    p_event_key: commandKey,
     p_line_user_id: lineUserId,
     p_amount: amount,
   });
@@ -373,12 +390,9 @@ async function saveTransaction(
   }
 
   const today = todayISO();
-  const rows = await rangeRows(admin, userId, { from: today, to: today });
-  const spentToday = rows
-    .filter((r) => r.type === "expense")
-    .reduce((sum, r) => sum + Number(r.amount), 0);
+  const summary = await rangeSummary(admin, userId, { from: today, to: today });
 
-  return `${head}\n\nวันนี้ใช้ไปแล้ว ${fmt(spentToday)} บาท`;
+  return `${head}\n\nวันนี้ใช้ไปแล้ว ${fmt(summary.expense)} บาท`;
 }
 
 // ---- entry point used by the webhook ----
@@ -390,11 +404,15 @@ export async function handleLineMessage(
 ): Promise<string> {
   const trimmed = text.trim();
 
+  // "manual" is the test/default value — commands replay by real webhook
+  // event keys only, so manual invocations must not poison the ledger.
+  const commandKey = eventKey === "manual" ? "" : eventKey;
+
   // Normalize the prefix only — the base64url token itself is case-sensitive
   // and must reach the database exactly as generated (audit: uppercase bug).
   const codeMatch = trimmed.match(LINK_CODE_RE);
   if (codeMatch) {
-    return linkByCode(lineUserId, `MONEY-${codeMatch[1]}`);
+    return linkByCode(lineUserId, `MONEY-${codeMatch[1]}`, commandKey);
   }
 
   const admin = createAdminClient();
@@ -420,15 +438,19 @@ export async function handleLineMessage(
     return recentText(userId);
   }
   if (UNDO_RE.test(trimmed.replace(/\s+/g, ""))) {
-    return undoLatest(lineUserId);
+    return undoLatest(lineUserId, commandKey);
   }
   const collapsed = trimmed.replace(/\s+/g, " ").trim();
   if (RESTORE_RE.test(collapsed.replace(/\s+/g, ""))) {
-    return restoreLatest(lineUserId);
+    return restoreLatest(lineUserId, commandKey);
   }
   const editMatch = collapsed.match(EDIT_LATEST_RE);
   if (editMatch) {
-    return updateLatestAmount(lineUserId, Number(editMatch[1].replace(/,/g, "")));
+    return updateLatestAmount(
+      lineUserId,
+      Number(editMatch[1].replace(/,/g, "")),
+      commandKey,
+    );
   }
   if (trimmed === "ช่วย" || trimmed.toLowerCase() === "help") {
     return HELP_TEXT;

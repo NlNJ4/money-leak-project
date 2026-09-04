@@ -156,6 +156,8 @@ export type Database = {
           received_at: string
           processed_at: string | null
           reply_text: string | null
+          line_timestamp: number
+          batch_seq: number
         }
         Insert: {
           id: string
@@ -170,6 +172,8 @@ export type Database = {
           received_at?: string
           processed_at?: string | null
           reply_text?: string | null
+          line_timestamp?: number
+          batch_seq?: number
         }
         Update: {
           id?: string
@@ -184,6 +188,26 @@ export type Database = {
           received_at?: string
           processed_at?: string | null
           reply_text?: string | null
+          line_timestamp?: number
+          batch_seq?: number
+        }
+        Relationships: []
+      }
+      line_command_results: {
+        Row: {
+          event_key: string
+          result: Json
+          created_at: string
+        }
+        Insert: {
+          event_key: string
+          result: Json
+          created_at?: string
+        }
+        Update: {
+          event_key?: string
+          result?: Json
+          created_at?: string
         }
         Relationships: []
       }
@@ -276,18 +300,37 @@ export type Database = {
       }
       delete_latest_line_transaction: {
         Args: {
+          p_event_key: string
           p_line_user_id: string
+        }
+        Returns: Json
+      }
+      create_linking_code: {
+        Args: {
+          p_user_id: string
+          p_code: string
+          p_expires_at: string
+        }
+        Returns: undefined
+      }
+      line_range_summary: {
+        Args: {
+          p_user_id: string
+          p_from: string
+          p_to: string
         }
         Returns: Json
       }
       restore_latest_line_transaction: {
         Args: {
+          p_event_key: string
           p_line_user_id: string
         }
         Returns: Json
       }
       update_latest_line_transaction_amount: {
         Args: {
+          p_event_key: string
           p_line_user_id: string
           p_amount: number
         }
@@ -295,6 +338,7 @@ export type Database = {
       }
       redeem_linking_code: {
         Args: {
+          p_event_key: string
           p_code: string
           p_provider: string
           p_provider_user_id: string

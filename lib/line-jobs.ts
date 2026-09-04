@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleLineMessage } from "@/lib/line-bot";
-import { pushToUser, replyToUser } from "@/lib/line";
+import { lineRetryKey, pushToUser, replyToUser } from "@/lib/line";
 
 // Durable LINE message processing. The webhook persists jobs BEFORE
 // acknowledging LINE (see app/api/line/webhook/route.ts); this module claims
@@ -15,6 +15,11 @@ const DEAD_RETENTION_DAYS = 2;
 // attempts² × 30s, capped: 30s, 2m, 4.5m, 8m → dead.
 const BACKOFF_BASE_MS = 30_000;
 const BACKOFF_CAP_MS = 15 * 60 * 1000;
+// Small claims + wall-clock budget: a sweep must finish inside the hosting
+// function duration even when every job hits the full Gemini timeout chain,
+// and unstarted jobs must never be left with burned attempt counters.
+const CLAIM_BATCH = 3;
+const SWEEP_BUDGET_MS = 40_000;
 
 type LineJobRow = {
   id: string;
@@ -30,6 +35,11 @@ export type EnqueueableEvent = {
   lineUserId: string;
   replyToken: string;
   text: string;
+  // LINE event timestamp (epoch ms) + position in the webhook batch: the
+  // claim RPC orders strictly by these per user, so "ลบล่าสุด" can never
+  // run before the "กินข้าว 100" it is meant to undo.
+  lineTimestamp: number;
+  batchSeq: number;
 };
 
 // Durably persist events before the webhook responds. ON CONFLICT DO
@@ -48,6 +58,8 @@ export async function enqueueLineJobs(
       line_user_id: event.lineUserId,
       reply_token: event.replyToken,
       text: event.text,
+      line_timestamp: event.lineTimestamp,
+      batch_seq: event.batchSeq,
     })),
     { onConflict: "id", ignoreDuplicates: true },
   );
@@ -57,35 +69,46 @@ export async function enqueueLineJobs(
   }
 }
 
-// Claim and process every due job: fresh rows from this webhook plus any
-// retries whose backoff has elapsed (and rows abandoned in 'processing' by
-// a dead worker — the claim RPC re-claims those after 10 minutes). One
-// job's failure never stops the others. Retention cleanup is deliberately
-// NOT run here — only the scheduled worker pays for it.
-export async function processDueLineJobs(limit = 20): Promise<number> {
+// Claim and process due jobs in small batches under a wall-clock budget.
+// Everything not claimed keeps its attempt counter untouched; the next
+// sweep (every minute) picks it up.
+export async function processDueLineJobs(
+  limit = CLAIM_BATCH,
+): Promise<number> {
   const admin = createAdminClient();
+  const deadline = Date.now() + SWEEP_BUDGET_MS;
+  let processed = 0;
 
-  const { data, error } = await admin.rpc("claim_due_line_jobs", {
-    p_limit: limit,
-  });
+  for (;;) {
+    const { data, error } = await admin.rpc("claim_due_line_jobs", {
+      p_limit: limit,
+    });
 
-  if (error) {
-    throw new Error(`claim_due_line_jobs failed: ${error.message}`);
+    if (error) {
+      throw new Error(`claim_due_line_jobs failed: ${error.message}`);
+    }
+
+    const jobs = (data ?? []) as LineJobRow[];
+    if (jobs.length === 0) break;
+
+    for (const job of jobs) {
+      await runJob(job);
+      processed += 1;
+    }
+
+    if (Date.now() >= deadline) break;
   }
 
-  for (const job of (data ?? []) as LineJobRow[]) {
-    await runJob(job);
-  }
-
-  return (data ?? []).length;
+  return processed;
 }
 
 async function runJob(job: LineJobRow): Promise<void> {
   const admin = createAdminClient();
 
   // Delivery-only retries reuse the stored reply; processing never runs
-  // twice for the same job (so summaries are not re-queried and replies
-  // are not recomputed after a failed send).
+  // twice for the same job. Should a crash land between a mutating command
+  // and this persist, the command RPCs replay their stored result by event
+  // key instead of operating on different data.
   let reply = job.reply_text;
 
   if (reply === null) {
@@ -97,10 +120,6 @@ async function runJob(job: LineJobRow): Promise<void> {
       return;
     }
 
-    // Persist the reply before delivering: a crash mid-delivery re-claims
-    // the job into the delivery-only path above. Even if processing were
-    // somehow re-run, the save_line_transaction marker prevents a double
-    // save.
     const { error: replyError } = await admin
       .from("line_jobs")
       .update({ reply_text: reply })
@@ -110,13 +129,18 @@ async function runJob(job: LineJobRow): Promise<void> {
     }
   }
 
+  // One stable retry key per job: LINE deduplicates on it, so a re-sent
+  // push after an ambiguous timeout cannot deliver twice (409 = already
+  // accepted).
+  const retryKey = lineRetryKey(job.id);
+
   try {
     if (job.attempts <= 1 && job.reply_token) {
-      await replyToUser(job.reply_token, reply);
+      await replyToUser(job.reply_token, reply, retryKey);
     } else {
       // Retry-time replies push instead: the reply token is single-use and
       // long expired by now.
-      await pushToUser(job.line_user_id, reply);
+      await pushToUser(job.line_user_id, reply, retryKey);
     }
   } catch (err) {
     console.error("[line-jobs] delivery failed:", job.id, err);
@@ -124,8 +148,8 @@ async function runJob(job: LineJobRow): Promise<void> {
     return;
   }
 
-  // Completed: clear the sensitive payload immediately — message text and
-  // tokens must not linger in the queue table.
+  // Completed: clear ALL sensitive payload — message text, reply token,
+  // and the financial reply content.
   const { error } = await admin
     .from("line_jobs")
     .update({
@@ -133,6 +157,7 @@ async function runJob(job: LineJobRow): Promise<void> {
       processed_at: new Date().toISOString(),
       text: null,
       reply_token: null,
+      reply_text: null,
     })
     .eq("id", job.id);
 
@@ -172,6 +197,7 @@ async function markRetry(
         await pushToUser(
           job.line_user_id,
           "เกิดข้อผิดพลาดในการบันทึกครับ ลองส่งข้อความนี้อีกครั้งนะครับ",
+          lineRetryKey(`${job.id}:dead-notice`),
         );
       } catch (pushErr) {
         console.error("[line-jobs] dead-letter notice push failed:", job.id, pushErr);
@@ -197,8 +223,8 @@ async function markRetry(
 
 // Scheduled-worker retention only: completed history after RETENTION_DAYS,
 // dead-letter payloads (kept briefly for inspection) after
-// DEAD_RETENTION_DAYS, and the webhook_events dedup markers that
-// save_line_transaction no longer cleans up inline.
+// DEAD_RETENTION_DAYS, webhook_events dedup markers, command results, and
+// expired linking codes.
 export async function cleanupOldJobs(): Promise<void> {
   const admin = createAdminClient();
   const now = Date.now();
@@ -227,6 +253,17 @@ export async function cleanupOldJobs(): Promise<void> {
 
   if (eventsError) {
     console.error("[line-jobs] webhook_events cleanup failed:", eventsError.message);
+  }
+
+  // Command results are the idempotency ledger; keep them for the same
+  // window as the dedup markers.
+  const { error: resultsError } = await admin
+    .from("line_command_results")
+    .delete()
+    .lt("created_at", completedCutoff);
+
+  if (resultsError) {
+    console.error("[line-jobs] command results cleanup failed:", resultsError.message);
   }
 
   // Deleted-transaction staging past the restore window: the snapshot
