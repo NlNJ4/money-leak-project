@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
 
 jobs:
@@ -29,3 +29,31 @@ jobs:
           # without touching any real project.
           NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Applies every migration to a fresh local Postgres — invalid or
+      # out-of-order SQL fails this step, which is exactly the gate we want.
+      - run: supabase start
+      - run: supabase db reset
+
+      - name: Extract local stack credentials
+        run: node scripts/ci-supabase-env.mjs >> "$GITHUB_ENV"
+
+      - run: pnpm test:integration

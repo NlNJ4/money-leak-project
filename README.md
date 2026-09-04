@@ -36,6 +36,15 @@ pnpm lint && pnpm exec tsc --noEmit && pnpm test && pnpm build
 
 A signed-webhook + worker acceptance script lives at `scripts/e2e-line-queue.mjs` (`node scripts/e2e-line-queue.mjs` against a running dev server).
 
+## Testing
+
+Two vitest projects (see `vitest.config.ts`):
+
+- **unit** — `pnpm test`. Hermetic: no database, no network (external APIs stubbed).
+- **integration** — `pnpm test:integration`. Runs against a real Postgres from the local Supabase stack (`supabase/config.toml`). In CI (`.github/workflows/ci.yml` → `integration` job) the runner starts the stack with `supabase start`, replays every migration via `supabase db reset` (this is the migration-validity gate), and runs the suites. Locally: install Docker Desktop, `npx supabase start`, copy `.env.test.example` to `.env.test` with the printed keys, export them, then `pnpm test:integration`.
+
+The integration setup (`test-integration/env.ts`) hard-fails unless `SUPABASE_URL` is loopback — production credentials can never execute these suites.
+
 ## Database migrations
 
 Migrations are plain SQL in `supabase/migrations/`, applied in order. Apply them through the Supabase dashboard SQL editor, `supabase db push`, or the Supabase MCP `apply_migration` tool. The database is the source of truth for: RLS policies, linking-code redemption, the LINE job queue (`line_jobs` + `claim_due_line_jobs`), transaction trust RPCs (`delete/restore/update_latest_line_transaction`), and the redemption rate limiter (`register_redeem_attempt`).
