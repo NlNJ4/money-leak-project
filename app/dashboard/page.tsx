@@ -1,5 +1,6 @@
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { isValidISODate, monthRange, todayRange, weekRange } from "@/lib/date";
+import { getLineConnected } from "@/lib/line-account";
 import { getAuthContext } from "@/lib/supabase/server";
 import { getDashboardData, listCategories } from "@/lib/transactions";
 
@@ -37,10 +38,11 @@ export default async function DashboardPage({
 
   // Start the static catalog immediately. getDashboardData() shares the same
   // request-memoized auth promise with the page and dashboard layout.
-  const [auth, data, categories] = await Promise.all([
+  const [auth, data, categories, lineConnected] = await Promise.all([
     getAuthContext(),
     getDashboardData(range),
     listCategories(),
+    getLineConnected(),
   ]);
 
   return (
@@ -50,6 +52,7 @@ export default async function DashboardPage({
       period={period}
       range={range}
       displayName={auth?.displayName ?? ""}
+      lineConnected={lineConnected}
     />
   );
 }

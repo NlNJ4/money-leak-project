@@ -27,12 +27,14 @@ export function DashboardView({
   period,
   range,
   displayName,
+  lineConnected,
 }: {
   data: DashboardData;
   categories: Category[];
   period: Period;
   range: { from: string; to: string };
   displayName: string;
+  lineConnected: boolean;
 }) {
   const { t, locale } = useI18n();
   const router = useRouter();
@@ -107,7 +109,7 @@ export function DashboardView({
               {formatDate(range.from, locale)} – {formatDate(range.to, locale)}
             </p>
           </div>
-          <ConnectLine />
+          <ConnectLine connected={lineConnected} />
           <button
             type="button"
             onClick={() => {

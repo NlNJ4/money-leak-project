@@ -239,6 +239,16 @@ export async function cleanupOldJobs(): Promise<void> {
   if (stagingError) {
     console.error("[line-jobs] staging cleanup failed:", stagingError.message);
   }
+
+  // Expired linking codes are unusable; drop them so the table stays tidy.
+  const { error: codesError } = await admin
+    .from("linking_codes")
+    .delete()
+    .lt("expires_at", new Date(now).toISOString());
+
+  if (codesError) {
+    console.error("[line-jobs] linking_codes cleanup failed:", codesError.message);
+  }
 }
 
 // Worker authentication: the token lives in a service-role-only table and

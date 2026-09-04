@@ -21,22 +21,22 @@ const RESTORE_RE = /^กู้คืน(ล่าสุด)?$/;
 // "แก้ล่าสุด 80" / "แก้ 80" / "แก้ 80 บาท" — fix the latest amount.
 const EDIT_LATEST_RE = /^แก้(?:ล่าสุด|รายการล่าสุด)?\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?$/;
 
-// Brute-force guard for code redemption: 5 attempts per LINE user per hour.
-// In-memory is per server instance; acceptable for a single-user MVP, but a
-// shared store (e.g. a Postgres counter) is needed for multi-instance deploys.
-const REDEEM_LIMIT = 5;
-const REDEEM_WINDOW_MS = 60 * 60 * 1000;
-const redeemAttempts = new Map<string, { count: number; resetAt: number }>();
-
-function redeemRateLimited(lineUserId: string): boolean {
-  const now = Date.now();
-  const entry = redeemAttempts.get(lineUserId);
-  if (!entry || entry.resetAt < now) {
-    redeemAttempts.set(lineUserId, { count: 1, resetAt: now + REDEEM_WINDOW_MS });
-    return false;
+// Brute-force guard for code redemption: 5 attempts per LINE user per hour,
+// counted atomically in the database (register_redeem_attempt RPC) so it
+// holds across serverless instances.
+async function redeemAllowed(
+  admin: ReturnType<typeof createAdminClient>,
+  lineUserId: string,
+): Promise<boolean> {
+  const { data, error } = await admin.rpc("register_redeem_attempt", {
+    p_line_user_id: lineUserId,
+  });
+  if (error) {
+    // Fail open: a limiter outage must not lock real users out of linking.
+    console.error("[line-bot] rate limit check failed:", error.message);
+    return true;
   }
-  entry.count += 1;
-  return entry.count > REDEEM_LIMIT;
+  return data === true;
 }
 
 const HELP_TEXT = [
@@ -88,11 +88,12 @@ export async function linkByCode(
   lineUserId: string,
   code: string,
 ): Promise<string> {
-  if (redeemRateLimited(lineUserId)) {
+  const admin = createAdminClient();
+
+  if (!(await redeemAllowed(admin, lineUserId))) {
     return "พยายามหลายครั้งเกินไปครับ ลองอีกครั้งในภายหลังนะครับ";
   }
 
-  const admin = createAdminClient();
   const { data: status, error } = await admin.rpc("redeem_linking_code", {
     p_code: code,
     p_provider: "line",

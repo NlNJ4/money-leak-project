@@ -238,6 +238,24 @@ export type Database = {
         }
         Relationships: []
       }
+      line_redeem_attempts: {
+        Row: {
+          line_user_id: string
+          window_start: string
+          count: number
+        }
+        Insert: {
+          line_user_id: string
+          window_start?: string
+          count?: number
+        }
+        Update: {
+          line_user_id?: string
+          window_start?: string
+          count?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -282,6 +300,12 @@ export type Database = {
           p_provider_user_id: string
         }
         Returns: string
+      }
+      register_redeem_attempt: {
+        Args: {
+          p_line_user_id: string
+        }
+        Returns: boolean
       }
       save_line_transaction: {
         Args: {

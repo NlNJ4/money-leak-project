@@ -16,12 +16,13 @@ export async function POST() {
   const code = `MONEY-${randomBytes(16).toString("base64url")}`;
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
+  // One active code per user: issuing a new code invalidates all previous
+  // ones (RLS scopes the delete to the caller's own rows).
+  await supabase.from("linking_codes").delete().eq("user_id", user.id);
+
   const { error } = await supabase
     .from("linking_codes")
-    .upsert(
-      { code, user_id: user.id, expires_at: expiresAt },
-      { onConflict: "code" },
-    );
+    .insert({ code, user_id: user.id, expires_at: expiresAt });
 
   if (error) {
     return NextResponse.json({ error: "insert_failed" }, { status: 500 });

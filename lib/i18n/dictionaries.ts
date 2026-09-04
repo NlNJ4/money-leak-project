@@ -55,6 +55,11 @@ const th = {
     },
     line: {
       connect: "เชื่อมต่อ LINE",
+      connected: "เชื่อมต่อ LINE แล้ว",
+      disconnect: "ยกเลิกการเชื่อมต่อ",
+      confirmDisconnect: "ยืนยันยกเลิก",
+      copy: "คัดลอก",
+      copied: "คัดลอกแล้ว",
       instructions: "ส่งโค้ดนี้ไปที่ LINE Bot ของคุณภายใน 15 นาที",
       failed: "ขอโค้ดไม่สำเร็จ กรุณาลองอีกครั้ง",
     },
@@ -137,6 +142,11 @@ const en: Dictionary = {
     },
     line: {
       connect: "Connect LINE",
+      connected: "LINE connected",
+      disconnect: "Disconnect",
+      confirmDisconnect: "Confirm disconnect",
+      copy: "Copy",
+      copied: "Copied",
       instructions: "Send this code to your LINE bot within 15 minutes",
       failed: "Could not generate a code. Please try again.",
     },
