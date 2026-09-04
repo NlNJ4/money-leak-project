@@ -51,7 +51,7 @@ const EXPENSE_KEYWORDS: ReadonlyArray<
   ],
   [
     "food",
-    ["กิน", "ข้าว", "กาแฟ", "กาฟเฟ่", "ชา", "นม", "ก๋วยเตี๋ยว", "ตี๋น้อย", "อาหาร", "ขนม", "ของกิน", "มื้อ", "ส้มตำ", "ชาบู", "หมูกระทะ", "โกโก้", "น้ำอัดลม", "น้ำดื่ม", "น้ำ", "เบียร์"],
+    ["กิน", "ข้าว", "กาแฟ", "กาฟเฟ่", "ชา", "นม", "ก๋วยเตี๋ยว", "ตี๋น้อย", "อาหาร", "ขนม", "ของกิน", "มื้อ", "ส้มตำ", "ชาบู", "หมูกระทะ", "โกโก้", "น้ำอัดลม", "น้ำดื่ม", "น้ำเปล่า", "เบียร์"],
   ],
   [
     "housing",
@@ -114,6 +114,17 @@ const PERCENT_RE = /%|เปอร์เซ็นต์|เปอร์เซน
 // debt?) — never silently strip the sign and save a positive amount.
 const NEGATIVE_AMOUNT_RE = /-\s*\d/;
 
+// Counting units: "<number> <unit>" is a quantity of things, not a baht
+// amount ("กินข้าว 5 คน", "ซื้อเสื้อ 2 ตัว"). Those phrases are stripped
+// before amount extraction so they can never become the price.
+const COUNT_UNIT_RE =
+  /\d+(?:\.\d+)?\s*(?:คน|ตัว|ชิ้น|แก้ว|ขวด|กล่อง|จาน|ชุด|คู่|ครั้ง|ลูก|อัน)/g;
+
+// Outgoing refunds ("คืนเงินให้ลูกค้า") are expenses with no matching
+// expense category — escalate instead of misfiling them as income/refund.
+// "ได้เงินคืน/รับเงินคืน" (incoming) keep parsing locally.
+const OUTGOING_REFUND_RE = /คืน(?:เงิน|สินค้า)?\s*ให้/;
+
 // "60k", "1พัน", "2 ล้าน" fold into plain numbers before extraction. The
 // lookahead stops "5km" (kilometers) from folding.
 const AMOUNT_SUFFIX_RE = /(\d+(?:\.\d+)?)\s*(k|พัน|หมื่น|แสน|ล้าน)(?![a-z])/gi;
@@ -149,12 +160,14 @@ function normalize(text: string): string {
 export function parseWithConfidence(text: string): RuleParseResult {
   const normalized = normalize(text);
 
-  // Hard stops first: signs, percentages, and clock times are meanings the
-  // rules must not guess at — escalate rather than mis-save.
+  // Hard stops first: signs, percentages, clock times, and outgoing
+  // refunds are meanings the rules must not guess at — escalate rather
+  // than mis-save.
   if (
     NEGATIVE_AMOUNT_RE.test(normalized) ||
     PERCENT_RE.test(normalized) ||
-    TIME_WORDS.some((word) => normalized.includes(word))
+    TIME_WORDS.some((word) => normalized.includes(word)) ||
+    OUTGOING_REFUND_RE.test(normalized)
   ) {
     return { parsed: null, confidence: CONFIDENCE_AMBIGUOUS };
   }
@@ -165,8 +178,10 @@ export function parseWithConfidence(text: string): RuleParseResult {
     ? toISODate(new Date(Date.now() - 86_400_000))
     : todayISO();
 
+  // Count phrases ("3 แก้ว") are removed before amount extraction so only
+  // real baht amounts remain.
   const withoutCurrency = foldAmountSuffixes(
-    normalized.replace(CURRENCY_RE, " "),
+    normalized.replace(CURRENCY_RE, " ").replace(COUNT_UNIT_RE, " "),
   );
   const amounts = [...withoutCurrency.matchAll(NUMBER_RE)].map((m) => m[0]);
 

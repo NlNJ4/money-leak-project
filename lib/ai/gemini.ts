@@ -1,7 +1,11 @@
 import "server-only";
 import { z } from "zod";
-import { CATEGORY_SLUGS } from "@/lib/categories";
-import { toISODate, todayISO as todayISOBangkok } from "@/lib/date";
+import {
+  CATEGORY_SLUGS,
+  EXPENSE_CATEGORY_SLUGS,
+  INCOME_CATEGORY_SLUGS,
+} from "@/lib/categories";
+import { isValidISODate, toISODate, todayISO as todayISOBangkok } from "@/lib/date";
 import type {
   ParsedTransaction,
   TransactionParser,
@@ -28,6 +32,36 @@ const responseSchema = z.discriminatedUnion("kind", [
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   }),
 ]);
+
+// Same limits the web form and rule parser enforce (lib/validation.ts,
+// lib/ai/rule-parser.ts): the model output must never bypass them.
+const MAX_AMOUNT = 999_999_999;
+
+// Returns a reason string when the parsed transaction violates the app's
+// own validation rules, else null.
+function validateParsed(d: {
+  type: "income" | "expense";
+  amount: number;
+  category: (typeof CATEGORY_SLUGS)[number];
+  description: string;
+  date: string;
+}): string | null {
+  if (d.amount <= 0 || d.amount > MAX_AMOUNT) {
+    return "amount out of range";
+  }
+  if (!isValidISODate(d.date)) {
+    return "date is not a real calendar date";
+  }
+  if (d.description.trim().length > 200) {
+    return "description too long";
+  }
+  const allowed =
+    d.type === "expense" ? EXPENSE_CATEGORY_SLUGS : INCOME_CATEGORY_SLUGS;
+  if (!(allowed as readonly string[]).includes(d.category)) {
+    return "category does not match type";
+  }
+  return null;
+}
 
 function buildPrompt(text: string): string {
   // Bangkok wall-clock "today", so relative dates resolve correctly on UTC
@@ -174,11 +208,19 @@ export class GeminiParser implements TransactionParser {
     }
     const d = parsed.data;
 
+    // Invalid values are a provider failure, not a user message: throw so
+    // parseTransaction tries the next model instead of enqueueing a
+    // transaction the database will reject.
+    const violation = validateParsed(d);
+    if (violation) {
+      throw new Error(`Gemini output rejected (${violation}): ${JSON.stringify(d).slice(0, 200)}`);
+    }
+
     return {
       type: d.type,
       amount: d.amount,
       category: d.category,
-      description: d.description.trim() || d.category,
+      description: d.description.trim().slice(0, 200) || d.category,
       date: d.date,
     };
   }

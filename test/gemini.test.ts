@@ -127,6 +127,28 @@ describe("GeminiParser.parseTransaction", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects model output that violates app validation, trying the next model", async () => {
+    const fetchMock = stubFetchSequence([
+      {
+        status: 200,
+        // Amount over the app maximum and a fake calendar date.
+        body: geminiBody(
+          '{"kind":"transaction","type":"expense","amount":1000000000,"category":"food","description":"x","date":"2026-02-30"}',
+        ),
+      },
+      {
+        status: 200,
+        body: geminiBody(
+          '{"kind":"transaction","type":"expense","amount":120,"category":"food","description":"กินข้าว","date":"2026-08-29"}',
+        ),
+      },
+    ]);
+
+    const result = await new GeminiParser().parseTransaction("กินข้าว 120");
+    expect(result?.amount).toBe(120);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does not send the removed temperature parameter to gemini-3 models", async () => {
     const fetchMock = stubFetchSequence([
       {

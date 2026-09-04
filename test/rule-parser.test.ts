@@ -180,4 +180,33 @@ describe("parseWithConfidence — escalates to Gemini instead of guessing", () =
     const result = parseWithConfidence("วิ่ง 5km");
     expect(result.confidence).toBeLessThan(0.7);
   });
+
+  it("never prices counting units like 5 คน or 2 ตัว", () => {
+    for (const text of ["กินข้าว 5 คน", "ซื้อเสื้อ 2 ตัว", "กาแฟ 3 แก้ว"]) {
+      const result = parseWithConfidence(text);
+      expect(result.confidence, text).toBeLessThan(0.7);
+    }
+  });
+
+  it("lets a real amount survive alongside a count phrase", () => {
+    const { parsed, confidence } = parseWithConfidence("ซื้อของ 500 แถม 2 ชิ้น");
+    expect(parsed).not.toBeNull();
+    expect(parsed?.amount).toBe(500);
+    expect(confidence).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it("escalates outgoing refunds instead of booking income", () => {
+    const result = parseWithConfidence("คืนเงินให้ลูกค้า 500");
+    expect(result.confidence).toBeLessThan(0.7);
+  });
+
+  it("does not let น้ำหอม match the water/drink category", () => {
+    const { parsed } = parseWithConfidence("ซื้อน้ำหอม 900");
+    expect(parsed?.category).toBe("other");
+  });
+
+  it("still classifies bottled water as food", () => {
+    const { parsed } = parseWithConfidence("ซื้อน้ำดื่ม 20");
+    expect(parsed?.category).toBe("food");
+  });
 });
