@@ -43,6 +43,7 @@ const th = {
     },
     form: {
       title: "เพิ่มรายการใหม่",
+      editTitle: "แก้ไขรายการ",
       type: "ประเภท",
       typeExpense: "รายจ่าย",
       typeIncome: "รายรับ",
@@ -53,6 +54,12 @@ const th = {
       save: "บันทึก",
       saving: "กำลังบันทึก...",
       cancel: "ยกเลิก",
+    },
+    recent: {
+      edit: "แก้ไขรายการนี้",
+      delete: "ลบรายการนี้",
+      confirmDelete: "ลบ",
+      cancelDelete: "ไม่ลบ",
     },
     empty: "ยังไม่มีรายการในช่วงนี้",
     errors: {
@@ -101,6 +108,7 @@ const en: Dictionary = {
     },
     form: {
       title: "New transaction",
+      editTitle: "Edit transaction",
       type: "Type",
       typeExpense: "Expense",
       typeIncome: "Income",
@@ -111,6 +119,12 @@ const en: Dictionary = {
       save: "Save",
       saving: "Saving...",
       cancel: "Cancel",
+    },
+    recent: {
+      edit: "Edit this transaction",
+      delete: "Delete this transaction",
+      confirmDelete: "Delete",
+      cancelDelete: "Keep",
     },
     empty: "No transactions in this period",
     errors: {

@@ -15,6 +15,12 @@ const LINK_CODE_RE = /^money-([A-Za-z0-9_-]{22})$/i;
 // ("ลบ ล่าสุด", "ยกเลิกรายการล่าสุด") all work.
 const UNDO_RE = /^(?:ยกเลิก|ลบ)(?:รายการ)?ล่าสุด$/;
 
+// Restore the just-deleted transaction (within the 2-minute window).
+const RESTORE_RE = /^กู้คืน(ล่าสุด)?$/;
+
+// "แก้ล่าสุด 80" / "แก้ 80" / "แก้ 80 บาท" — fix the latest amount.
+const EDIT_LATEST_RE = /^แก้(?:ล่าสุด|รายการล่าสุด)?\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?$/;
+
 // Brute-force guard for code redemption: 5 attempts per LINE user per hour.
 // In-memory is per server instance; acceptable for a single-user MVP, but a
 // shared store (e.g. a Postgres counter) is needed for multi-instance deploys.
@@ -45,7 +51,9 @@ const HELP_TEXT = [
   "ดูสรุป:",
   "วันนี้ • เดือนนี้ • ล่าสุด",
   "",
-  "พิมพ์ผิด? พิมพ์ ลบล่าสุด เพื่อลบรายการล่าสุดครับ",
+  "พิมพ์ผิด? พิมพ์ ลบล่าสุด เพื่อลบรายการล่าสุด",
+  "แล้วพิมพ์ กู้คืน ภายใน 2 นาที เพื่อเอากลับ",
+  "แก้จำนวนเงิน: แก้ล่าสุด 80",
 ].join("\n");
 
 const NOT_LINKED_TEXT = [
@@ -244,6 +252,78 @@ async function undoLatest(lineUserId: string): Promise<string> {
     "",
     `${result.icon ?? "📦"} ${result.name ?? ""}${result.description ? ` · ${result.description}` : ""}`,
     `${fmt(Number(result.amount ?? 0))} บาท`,
+    "",
+    "↩️ พิมพ์ กู้คืน ภายใน 2 นาที เพื่อเอารายการนี้กลับครับ",
+  ].join("\n");
+}
+
+async function restoreLatest(lineUserId: string): Promise<string> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("restore_latest_line_transaction", {
+    p_line_user_id: lineUserId,
+  });
+
+  if (error || !data) {
+    throw new Error(`restore_latest_line_transaction failed: ${error?.message ?? "no result"}`);
+  }
+
+  const result = data as { status: string; description?: string; amount?: number | string };
+  if (result.status === "nothing_to_restore") {
+    return "ไม่มีรายการที่ลบไว้ภายใน 2 นาทีครับ";
+  }
+  if (result.status === "not_linked") {
+    return NOT_LINKED_TEXT;
+  }
+  if (result.status !== "restored") {
+    return "กู้คืนไม่สำเร็จครับ";
+  }
+
+  return [
+    "↩️ กู้คืนรายการแล้ว",
+    "",
+    `${result.description ? `${result.description} · ` : ""}${fmt(Number(result.amount ?? 0))} บาท`,
+  ].join("\n");
+}
+
+async function updateLatestAmount(
+  lineUserId: string,
+  amount: number,
+): Promise<string> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("update_latest_line_transaction_amount", {
+    p_line_user_id: lineUserId,
+    p_amount: amount,
+  });
+
+  if (error || !data) {
+    throw new Error(`update_latest_line_transaction_amount failed: ${error?.message ?? "no result"}`);
+  }
+
+  const result = data as {
+    status: string;
+    amount?: number | string;
+    description?: string;
+    icon?: string;
+    name?: string;
+  };
+  if (result.status === "invalid_amount") {
+    return "จำนวนเงินไม่ถูกต้องครับ ลองแบบนี้: แก้ล่าสุด 80";
+  }
+  if (result.status === "not_linked") {
+    return NOT_LINKED_TEXT;
+  }
+  if (result.status === "not_found") {
+    return "ยังไม่มีรายการให้แก้ครับ";
+  }
+  if (result.status !== "updated") {
+    return "แก้ไขไม่สำเร็จครับ";
+  }
+
+  return [
+    "✏️ แก้จำนวนเงินรายการล่าสุดแล้ว",
+    "",
+    `${result.icon ?? "📦"} ${result.name ?? ""}${result.description ? ` · ${result.description}` : ""}`,
+    `${fmt(Number(result.amount ?? 0))} บาท`,
   ].join("\n");
 }
 
@@ -340,6 +420,14 @@ export async function handleLineMessage(
   }
   if (UNDO_RE.test(trimmed.replace(/\s+/g, ""))) {
     return undoLatest(lineUserId);
+  }
+  const collapsed = trimmed.replace(/\s+/g, " ").trim();
+  if (RESTORE_RE.test(collapsed.replace(/\s+/g, ""))) {
+    return restoreLatest(lineUserId);
+  }
+  const editMatch = collapsed.match(EDIT_LATEST_RE);
+  if (editMatch) {
+    return updateLatestAmount(lineUserId, Number(editMatch[1].replace(/,/g, "")));
   }
   if (trimmed === "ช่วย" || trimmed.toLowerCase() === "help") {
     return HELP_TEXT;

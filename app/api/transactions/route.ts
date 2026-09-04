@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { handleServiceError } from "@/app/api/transactions/http";
 import {
-  ServiceError,
   createTransaction,
   listTransactions,
 } from "@/lib/transactions";
@@ -50,17 +50,4 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     return handleServiceError(err);
   }
-}
-
-function handleServiceError(err: unknown) {
-  if (err instanceof ServiceError) {
-    if (err.code === "unauthorized") {
-      return NextResponse.json({ error: err.code }, { status: 401 });
-    }
-    const status = err.code.startsWith("category") || err.code === "insert_failed"
-      ? 400
-      : 500;
-    return NextResponse.json({ error: err.code }, { status });
-  }
-  return NextResponse.json({ error: "internal_error" }, { status: 500 });
 }

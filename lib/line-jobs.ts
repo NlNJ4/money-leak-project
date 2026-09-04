@@ -228,6 +228,17 @@ export async function cleanupOldJobs(): Promise<void> {
   if (eventsError) {
     console.error("[line-jobs] webhook_events cleanup failed:", eventsError.message);
   }
+
+  // Deleted-transaction staging past the restore window: the snapshot
+  // holds financial data, so it must not outlive its usefulness.
+  const { error: stagingError } = await admin
+    .from("deleted_transaction_staging")
+    .delete()
+    .lt("deleted_at", new Date(now - 10 * 60_000).toISOString());
+
+  if (stagingError) {
+    console.error("[line-jobs] staging cleanup failed:", stagingError.message);
+  }
 }
 
 // Worker authentication: the token lives in a service-role-only table and

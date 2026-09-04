@@ -20,6 +20,15 @@ export const createTransactionSchema = z.object({
 
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 
+// Partial edit: only provided fields change. Changing type without also
+// providing a matching category is rejected at the service layer (and by
+// the DB trigger), because the current category belongs to the old type.
+export const updateTransactionSchema = createTransactionSchema.partial();
+
+export type UpdateTransactionInput = z.infer<typeof updateTransactionSchema>;
+
+export const idParamSchema = z.string().uuid();
+
 export const transactionFilterSchema = z
   .object({
     from: z.string(),

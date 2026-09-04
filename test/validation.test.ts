@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createTransactionSchema, transactionFilterSchema } from "@/lib/validation";
+import {
+  createTransactionSchema,
+  idParamSchema,
+  transactionFilterSchema,
+  updateTransactionSchema,
+} from "@/lib/validation";
 
 describe("createTransactionSchema", () => {
   const valid = {
@@ -55,5 +60,35 @@ describe("transactionFilterSchema", () => {
     expect(
       transactionFilterSchema.safeParse({ from: "2026-08-31", to: "2026-08-01" }).success,
     ).toBe(false);
+  });
+});
+
+describe("updateTransactionSchema", () => {
+  it("accepts an empty patch", () => {
+    expect(updateTransactionSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("accepts partial patches", () => {
+    expect(updateTransactionSchema.safeParse({ amount: 80 }).success).toBe(true);
+    expect(
+      updateTransactionSchema.safeParse({ description: "กาแฟ" }).success,
+    ).toBe(true);
+  });
+
+  it("still validates provided fields against the same rules", () => {
+    expect(updateTransactionSchema.safeParse({ amount: -1 }).success).toBe(false);
+    expect(updateTransactionSchema.safeParse({ category: "dining" }).success).toBe(false);
+    expect(updateTransactionSchema.safeParse({ type: "transfer" }).success).toBe(false);
+    expect(
+      updateTransactionSchema.safeParse({ date: "2026-99-99" }).success,
+    ).toBe(false);
+  });
+});
+
+describe("idParamSchema", () => {
+  it("accepts a uuid and rejects anything else", () => {
+    expect(idParamSchema.safeParse("1b671a64-40d5-491e-99b0-da01ff1f3341").success).toBe(true);
+    expect(idParamSchema.safeParse("not-a-uuid").success).toBe(false);
+    expect(idParamSchema.safeParse("1; drop table transactions").success).toBe(false);
   });
 });

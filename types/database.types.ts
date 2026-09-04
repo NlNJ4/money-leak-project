@@ -217,6 +217,27 @@ export type Database = {
         }
         Relationships: []
       }
+      deleted_transaction_staging: {
+        Row: {
+          id: string
+          user_id: string
+          payload: Json
+          deleted_at: string
+        }
+        Insert: {
+          id: string
+          user_id: string
+          payload: Json
+          deleted_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          payload?: Json
+          deleted_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -238,6 +259,19 @@ export type Database = {
       delete_latest_line_transaction: {
         Args: {
           p_line_user_id: string
+        }
+        Returns: Json
+      }
+      restore_latest_line_transaction: {
+        Args: {
+          p_line_user_id: string
+        }
+        Returns: Json
+      }
+      update_latest_line_transaction_amount: {
+        Args: {
+          p_line_user_id: string
+          p_amount: number
         }
         Returns: Json
       }

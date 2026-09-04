@@ -5,19 +5,38 @@ import { useI18n } from "@/lib/i18n/provider";
 import { todayISO } from "@/lib/date";
 import type { Category } from "@/lib/transactions";
 
+// Pre-filled values when the form edits an existing transaction; omit for
+// the plain create flow.
+export type EditableTransaction = {
+  id: string;
+  type: "expense" | "income";
+  amount: number;
+  category: string;
+  description: string;
+  date: string;
+};
+
 export function AddTransactionForm({
   categories,
   onSaved,
+  initial,
+  onCancel,
 }: {
   categories: Category[];
   onSaved: () => void;
+  initial?: EditableTransaction;
+  onCancel?: () => void;
 }) {
   const { t, locale } = useI18n();
-  const [type, setType] = useState<"expense" | "income">("expense");
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("");
-  const [description, setDescription] = useState("");
-  const [date, setDate] = useState(todayISO());
+  const [type, setType] = useState<"expense" | "income">(
+    initial?.type ?? "expense",
+  );
+  const [amount, setAmount] = useState(
+    initial ? String(initial.amount) : "",
+  );
+  const [category, setCategory] = useState(initial?.category ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [date, setDate] = useState(initial?.date ?? todayISO());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,25 +58,30 @@ export function AddTransactionForm({
 
     setSaving(true);
     try {
-      const response = await fetch("/api/transactions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type,
-          amount: Number(amount),
-          category,
-          description,
-          date,
-        }),
-      });
+      const response = await fetch(
+        initial ? `/api/transactions/${initial.id}` : "/api/transactions",
+        {
+          method: initial ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type,
+            amount: Number(amount),
+            category,
+            description,
+            date,
+          }),
+        },
+      );
 
       if (!response.ok) {
         setError(t.dashboard.errors.generic);
         return;
       }
 
-      setAmount("");
-      setDescription("");
+      if (!initial) {
+        setAmount("");
+        setDescription("");
+      }
       onSaved();
     } catch {
       setError(t.dashboard.errors.generic);
@@ -76,7 +100,20 @@ export function AddTransactionForm({
       onSubmit={submit}
       className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4"
     >
-      <h2 className="text-sm font-medium">{t.dashboard.form.title}</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium">
+          {initial ? t.dashboard.form.editTitle : t.dashboard.form.title}
+        </h2>
+        {initial && onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-xs text-zinc-500 hover:text-zinc-900"
+          >
+            {t.dashboard.form.cancel}
+          </button>
+        )}
+      </div>
 
       <div className="flex gap-2">
         {(

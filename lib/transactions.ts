@@ -6,6 +6,7 @@ import { createClient, getAuthContext } from "@/lib/supabase/server";
 import type {
   CreateTransactionInput,
   TransactionFilterRange,
+  UpdateTransactionInput,
 } from "@/lib/validation";
 
 export class ServiceError extends Error {
@@ -201,4 +202,94 @@ export async function createTransaction(input: CreateTransactionInput) {
   }
 
   return data as unknown as TransactionRow;
+}
+
+export async function updateTransaction(
+  id: string,
+  input: UpdateTransactionInput,
+): Promise<TransactionRow> {
+  const { supabase } = await requireClient();
+
+  // Fetch the current row first: RLS scopes it to the caller, and merging
+  // lets us validate type/category consistency against the final state.
+  const { data: current } = await supabase
+    .from("transactions")
+    .select("id, type, category:categories (slug)")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!current) {
+    throw new ServiceError("not_found");
+  }
+
+  const patch: {
+    type?: string;
+    amount?: number;
+    description?: string;
+    transaction_date?: string;
+    category_id?: string;
+  } = {};
+
+  if (input.amount !== undefined) patch.amount = input.amount;
+  if (input.description !== undefined) patch.description = input.description;
+  if (input.date !== undefined) patch.transaction_date = input.date;
+
+  const nextType = input.type ?? current.type;
+  if (input.type !== undefined) patch.type = input.type;
+
+  if (input.category !== undefined || input.type !== undefined) {
+    // A type change re-validates the category; if the caller did not send
+    // one, the existing category belongs to the old type and cannot carry
+    // over.
+    const slug = input.category ?? current.category?.slug;
+    if (!slug) {
+      throw new ServiceError("category_not_found");
+    }
+
+    const { data: category } = await supabase
+      .from("categories")
+      .select("id, type")
+      .eq("slug", slug)
+      .single();
+
+    if (!category) {
+      throw new ServiceError("category_not_found");
+    }
+    if (category.type !== nextType) {
+      throw new ServiceError("category_type_mismatch");
+    }
+
+    patch.category_id = category.id;
+  }
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .update(patch)
+    .eq("id", id)
+    .select(transactionSelect)
+    .single();
+
+  if (error || !data) {
+    throw new ServiceError("update_failed", error?.message);
+  }
+
+  return data as unknown as TransactionRow;
+}
+
+export async function deleteTransaction(id: string): Promise<void> {
+  const { supabase } = await requireClient();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .delete()
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    throw new ServiceError("delete_failed", error.message);
+  }
+  if (!data) {
+    throw new ServiceError("not_found");
+  }
 }

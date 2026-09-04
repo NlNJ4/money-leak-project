@@ -6,8 +6,15 @@ import { useState } from "react";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
 import { useI18n } from "@/lib/i18n/provider";
 import { formatAmountSigned, formatCurrency, formatDate } from "@/lib/format";
-import type { Category, DashboardData } from "@/lib/transactions";
-import { AddTransactionForm } from "@/components/dashboard/add-transaction-form";
+import type {
+  Category,
+  DashboardData,
+  TransactionRow,
+} from "@/lib/transactions";
+import {
+  AddTransactionForm,
+  type EditableTransaction,
+} from "@/components/dashboard/add-transaction-form";
 import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { DailyChart } from "@/components/dashboard/daily-chart";
 import { ConnectLine } from "@/components/dashboard/connect-line";
@@ -30,9 +37,29 @@ export function DashboardView({
   const { t, locale } = useI18n();
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<TransactionRow | null>(null);
 
   const categoryLabel = (c: { name_th: string; name_en: string }) =>
     locale === "th" ? c.name_th : c.name_en;
+
+  const startEditing = (row: TransactionRow) => {
+    setFormOpen(false);
+    setEditing(row);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const response = await fetch(`/api/transactions/${id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        router.refresh();
+      }
+    } catch {
+      // Network failure: leave the row; the user can retry.
+    }
+  };
 
   const cards = [
     { label: t.dashboard.income, value: data.totals.income, tone: "text-emerald-600" },
@@ -76,7 +103,10 @@ export function DashboardView({
           <ConnectLine />
           <button
             type="button"
-            onClick={() => setFormOpen((open) => !open)}
+            onClick={() => {
+              setEditing(null);
+              setFormOpen((open) => !open);
+            }}
             className="rounded-lg bg-zinc-900 px-3.5 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-zinc-700"
           >
             {formOpen ? t.dashboard.form.cancel : `+ ${t.dashboard.addTransaction}`}
@@ -90,6 +120,19 @@ export function DashboardView({
               setFormOpen(false);
               router.refresh();
             }}
+          />
+        )}
+
+        {editing && (
+          <AddTransactionForm
+            key={editing.id}
+            categories={categories}
+            initial={toEditable(editing)}
+            onSaved={() => {
+              setEditing(null);
+              router.refresh();
+            }}
+            onCancel={() => setEditing(null)}
           />
         )}
 
@@ -148,19 +191,25 @@ export function DashboardView({
         <RecentCard
           title={t.dashboard.recentTransactions}
           empty={t.dashboard.empty}
-          items={data.recent.map((r) => ({
-            key: r.id,
-            icon: r.category?.icon ?? "📦",
-            name: r.category ? categoryLabel(r.category) : "—",
-            description: r.description,
-            date: formatDate(r.transaction_date, locale),
-            signed: formatAmountSigned(r.type, Number(r.amount)),
-            income: r.type === "income",
-          }))}
+          rows={data.recent}
+          categoryLabel={categoryLabel}
+          onEdit={startEditing}
+          onDelete={handleDelete}
         />
       </main>
     </div>
   );
+}
+
+function toEditable(row: TransactionRow): EditableTransaction {
+  return {
+    id: row.id,
+    type: row.type === "income" ? "income" : "expense",
+    amount: Number(row.amount),
+    category: row.category?.slug ?? "",
+    description: row.description,
+    date: row.transaction_date,
+  };
 }
 
 function CustomRange({ from, to }: { from: string; to: string }) {
@@ -207,44 +256,91 @@ function CustomRange({ from, to }: { from: string; to: string }) {
 function RecentCard({
   title,
   empty,
-  items,
+  rows,
+  categoryLabel,
+  onEdit,
+  onDelete,
 }: {
   title: string;
   empty: string;
-  items: {
-    key: string;
-    icon: string;
-    name: string;
-    description: string;
-    date: string;
-    signed: string;
-    income: boolean;
-  }[];
+  rows: TransactionRow[];
+  categoryLabel: (c: { name_th: string; name_en: string }) => string;
+  onEdit: (row: TransactionRow) => void;
+  onDelete: (id: string) => void;
 }) {
+  const { t, locale } = useI18n();
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <h2 className="text-sm font-medium">{title}</h2>
       <ul className="mt-3 flex flex-col divide-y divide-zinc-100">
-        {items.length === 0 && (
+        {rows.length === 0 && (
           <li className="py-2 text-xs text-zinc-400">{empty}</li>
         )}
-        {items.map((item) => (
-          <li key={item.key} className="flex items-center gap-2 py-2 text-xs">
-            <span>{item.icon}</span>
+        {rows.map((row) => (
+          <li
+            key={row.id}
+            className="flex items-center gap-2 py-2 text-xs"
+          >
+            <span>{row.category?.icon ?? "📦"}</span>
             <span className="min-w-0 flex-1 truncate">
-              {item.name}
-              {item.description ? (
-                <span className="text-zinc-400"> · {item.description}</span>
+              {row.category ? categoryLabel(row.category) : "—"}
+              {row.description ? (
+                <span className="text-zinc-400"> · {row.description}</span>
               ) : null}
             </span>
-            <span className="text-zinc-400">{item.date}</span>
+            <span className="hidden text-zinc-400 sm:inline">
+              {formatDate(row.transaction_date, locale)}
+            </span>
             <span
               className={`w-20 text-right font-medium tabular-nums ${
-                item.income ? "text-emerald-600" : "text-zinc-700"
+                row.type === "income" ? "text-emerald-600" : "text-zinc-700"
               }`}
             >
-              {item.signed}
+              {formatAmountSigned(row.type, Number(row.amount))}
             </span>
+            {confirmId === row.id ? (
+              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={t.dashboard.recent.confirmDelete}
+                  onClick={() => {
+                    setConfirmId(null);
+                    onDelete(row.id);
+                  }}
+                  className="rounded-md bg-rose-600 px-2 py-1 font-medium text-white hover:bg-rose-500"
+                >
+                  {t.dashboard.recent.confirmDelete}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmId(null)}
+                  className="rounded-md border border-zinc-200 px-2 py-1 text-zinc-500 hover:text-zinc-900"
+                >
+                  {t.dashboard.recent.cancelDelete}
+                </button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={t.dashboard.recent.edit}
+                  onClick={() => onEdit(row)}
+                  className="rounded-md px-1.5 py-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  aria-label={t.dashboard.recent.delete}
+                  onClick={() => setConfirmId(row.id)}
+                  className="rounded-md px-1.5 py-1 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                >
+                  🗑
+                </button>
+              </span>
+            )}
           </li>
         ))}
       </ul>
