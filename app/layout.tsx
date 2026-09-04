@@ -24,7 +24,14 @@ export const metadata: Metadata = {
   description: "Track income and expenses via LINE chat",
 };
 
-export default async function RootLayout({ children }: LayoutProps<"/">) {
+// Explicit prop typing (not the generated LayoutProps global) so plain
+// `tsc --noEmit` works without a prior build/dev typegen — CI depends on
+// that.
+export default async function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const locale = await getLocale();
 
   return (
