@@ -18,8 +18,9 @@ export type RuleParseResult = {
 const CONFIDENCE_MATCHED = 0.9;
 const CONFIDENCE_FALLBACK = 0.75;
 // Below-threshold outcomes: never auto-saved, always escalated.
+const CONFIDENCE_NO_VERB = 0.4; // no keyword AND no transaction verb
 const CONFIDENCE_EXPLICIT_DATE = 0.3; // dates the rules refuse to guess on
-const CONFIDENCE_AMBIGUOUS = 0.2; // multiple/invalid numbers
+const CONFIDENCE_AMBIGUOUS = 0.2; // multiple/invalid/negative/percent/time
 const CONFIDENCE_BARE_AMOUNT = 0.5; // number with no description text
 const CONFIDENCE_NOT_TRANSACTION = 0;
 
@@ -100,6 +101,36 @@ const EXPLICIT_DATE_RE =
 const YESTERDAY_WORDS = ["เมื่อวานนี้", "เมื่อวาน", "วานนี้"];
 const TODAY_WORDS = ["วันนี้", "เมื่อกี้", "เมื่อครู่"];
 
+// When no category keyword matches, an expense still needs an explicit
+// transaction verb — otherwise "เจอกัน 5 คน" would auto-save as an "other"
+// expense. Income triggers are already verb-like, so income is exempt.
+const EXPENSE_VERBS = ["ซื้อ", "จ่าย", "เสีย", "โอน", "ใช้"];
+
+// Conversational time vocabulary: "เจอกัน 5 โมง" is a meetup time, not an
+// expense — escalate instead of guessing.
+const TIME_WORDS = ["โมง", "ชั่วโมง", "นาที", "นาฬิกา", "ทุ่ม", "ครึ่ง"];
+const PERCENT_RE = /%|เปอร์เซ็นต์|เปอร์เซนต์/;
+// A minus in front of a number is a meaning we do not guess at (refund?
+// debt?) — never silently strip the sign and save a positive amount.
+const NEGATIVE_AMOUNT_RE = /-\s*\d/;
+
+// "60k", "1พัน", "2 ล้าน" fold into plain numbers before extraction. The
+// lookahead stops "5km" (kilometers) from folding.
+const AMOUNT_SUFFIX_RE = /(\d+(?:\.\d+)?)\s*(k|พัน|หมื่น|แสน|ล้าน)(?![a-z])/gi;
+const SUFFIX_MULTIPLIERS: Record<string, number> = {
+  k: 1_000,
+  พัน: 1_000,
+  หมื่น: 10_000,
+  แสน: 100_000,
+  ล้าน: 1_000_000,
+};
+
+function foldAmountSuffixes(text: string): string {
+  return text.replace(AMOUNT_SUFFIX_RE, (_match, num: string, suffix: string) =>
+    String(Number(num) * (SUFFIX_MULTIPLIERS[suffix.toLowerCase()] ?? 1)),
+  );
+}
+
 function normalize(text: string): string {
   return text
     .normalize("NFC")
@@ -118,13 +149,25 @@ function normalize(text: string): string {
 export function parseWithConfidence(text: string): RuleParseResult {
   const normalized = normalize(text);
 
+  // Hard stops first: signs, percentages, and clock times are meanings the
+  // rules must not guess at — escalate rather than mis-save.
+  if (
+    NEGATIVE_AMOUNT_RE.test(normalized) ||
+    PERCENT_RE.test(normalized) ||
+    TIME_WORDS.some((word) => normalized.includes(word))
+  ) {
+    return { parsed: null, confidence: CONFIDENCE_AMBIGUOUS };
+  }
+
   const isYesterday = YESTERDAY_WORDS.some((word) => normalized.includes(word));
   const hasExplicitDate = EXPLICIT_DATE_RE.test(normalized);
   const date = isYesterday
     ? toISODate(new Date(Date.now() - 86_400_000))
     : todayISO();
 
-  const withoutCurrency = normalized.replace(CURRENCY_RE, " ");
+  const withoutCurrency = foldAmountSuffixes(
+    normalized.replace(CURRENCY_RE, " "),
+  );
   const amounts = [...withoutCurrency.matchAll(NUMBER_RE)].map((m) => m[0]);
 
   if (amounts.length === 0) {
@@ -182,6 +225,13 @@ export function parseWithConfidence(text: string): RuleParseResult {
   };
 
   let confidence = matched ? CONFIDENCE_MATCHED : CONFIDENCE_FALLBACK;
+  if (
+    !matched &&
+    type === "expense" &&
+    !EXPENSE_VERBS.some((verb) => scrubbed.includes(verb))
+  ) {
+    confidence = CONFIDENCE_NO_VERB;
+  }
   if (hasExplicitDate) {
     confidence = Math.min(confidence, CONFIDENCE_EXPLICIT_DATE);
   }

@@ -81,6 +81,28 @@ const corpus: Array<{ text: string; expected: Expected }> = [
     text: "ได้เงิน 2000",
     expected: { type: "income", amount: 2000, category: "other_income", description: "ได้เงิน", date: today, confidence: 0.75 },
   },
+  // Expense fallback stays local only when an explicit transaction verb is present
+  {
+    text: "ซื้อ 200",
+    expected: { type: "expense", amount: 200, category: "other", description: "ซื้อ", date: today, confidence: 0.75 },
+  },
+  {
+    text: "จ่าย 150",
+    expected: { type: "expense", amount: 150, category: "other", description: "จ่าย", date: today, confidence: 0.75 },
+  },
+  // Amount suffixes fold into plain numbers
+  {
+    text: "ซื้อไอเทม 60k",
+    expected: { type: "expense", amount: 60000, category: "other", description: "ซื้อไอเทม", date: today, confidence: 0.75 },
+  },
+  {
+    text: "กินข้าว 1พัน",
+    expected: { type: "expense", amount: 1000, category: "food", description: "กินข้าว", date: today, confidence: 0.9 },
+  },
+  {
+    text: "โบนัส 2 ล้าน",
+    expected: { type: "income", amount: 2000000, category: "other_income", description: "โบนัส", date: today, confidence: 0.75 },
+  },
 ];
 
 describe("parseWithConfidence — local corpus", () => {
@@ -127,6 +149,35 @@ describe("parseWithConfidence — escalates to Gemini instead of guessing", () =
   it("rejects a zero amount", () => {
     const result = parseWithConfidence("กินข้าว 0");
     expect(result.parsed).toBeNull();
+    expect(result.confidence).toBeLessThan(0.7);
+  });
+
+  it("rejects conversational times like เจอกัน 5 โมง", () => {
+    for (const text of ["เจอกัน 5 โมง", "นัดเจอ 7 ครึ่ง", "คุยกัน 10 นาที"]) {
+      const result = parseWithConfidence(text);
+      expect(result.confidence, text).toBeLessThan(0.7);
+    }
+  });
+
+  it("escalates counts without a transaction verb or category keyword", () => {
+    const result = parseWithConfidence("เจอกัน 5 คน");
+    expect(result.confidence).toBeLessThan(0.7);
+  });
+
+  it("never silently strips a negative sign", () => {
+    const result = parseWithConfidence("กินข้าว -100");
+    expect(result.parsed).toBeNull();
+    expect(result.confidence).toBeLessThan(0.7);
+  });
+
+  it("escalates percentage amounts", () => {
+    const result = parseWithConfidence("ดอกเบี้ย 3%");
+    expect(result.confidence).toBeLessThan(0.7);
+  });
+
+  it("does not fold kilometer-like words into amounts", () => {
+    // "5km" must not become 5000 — only a bare k suffix folds.
+    const result = parseWithConfidence("วิ่ง 5km");
     expect(result.confidence).toBeLessThan(0.7);
   });
 });
