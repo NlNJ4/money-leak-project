@@ -55,9 +55,9 @@ Retries must run even when no new LINE message arrives, so a Supabase pg_cron jo
 `pg_net` is asynchronous — a cron run succeeding only means the HTTP request was queued. Check the actual worker responses with:
 
 ```sql
-select id, status_code, timed_out, collect_time
+select id, status_code, timed_out, created
 from net._http_response
-order by collect_time desc
+order by created desc
 limit 20;
 ```
 
