@@ -8,6 +8,7 @@ import type {
   TransactionFilterRange,
   UpdateTransactionInput,
 } from "@/lib/validation";
+import { idParamSchema } from "@/lib/validation";
 
 export class ServiceError extends Error {
   constructor(
@@ -100,6 +101,22 @@ export type HistoryFilters = {
 };
 
 export type HistoryCursor = { createdAt: string; id: string };
+
+// Cursor strings come from URLs, so both halves are strictly validated
+// before they can reach a Postgres filter.
+const ISO_DATETIME_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+export function parseHistoryCursor(
+  raw: string | undefined | null,
+): HistoryCursor | undefined {
+  if (!raw) return undefined;
+  const [createdAt, id] = raw.split("|");
+  if (!createdAt || !id) return undefined;
+  if (!ISO_DATETIME_RE.test(createdAt)) return undefined;
+  if (!idParamSchema.safeParse(id).success) return undefined;
+  return { createdAt, id };
+}
 
 export type HistoryPageData = {
   rows: HistoryRow[];

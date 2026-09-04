@@ -1,11 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handleServiceError } from "@/app/api/transactions/http";
-import { listHistory } from "@/lib/transactions";
+import {
+  listHistory,
+  parseHistoryCursor,
+} from "@/lib/transactions";
 import { historyFilterSchema } from "@/lib/validation";
 
-// CSV export of the same filtered view the history page shows. Capped to
-// keep the response bounded; a personal ledger will never approach it.
+// CSV export of the same filtered view the history page shows. Rows are
+// fetched cursor-page by cursor-page: hosted Supabase caps a single request
+// at 1000 rows, so one big request would silently omit records.
 const MAX_EXPORT_ROWS = 5000;
+const PAGE_SIZE = 1000;
 
 function csvCell(value: string | number | null | undefined): string {
   const text = String(value ?? "");
@@ -26,21 +31,25 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { rows } = await listHistory(
-      {
-        range: { from: parsed.data.from, to: parsed.data.to },
-        type: parsed.data.type,
-        category: parsed.data.category,
-        source: parsed.data.source,
-        q: parsed.data.q,
-      },
-      undefined,
-      MAX_EXPORT_ROWS,
-    );
+    const filters = {
+      range: { from: parsed.data.from, to: parsed.data.to },
+      type: parsed.data.type,
+      category: parsed.data.category,
+      source: parsed.data.source,
+      q: parsed.data.q,
+    };
+
+    const all = [];
+    let cursor = parseHistoryCursor(params.cursor);
+    do {
+      const page = await listHistory(filters, cursor, PAGE_SIZE);
+      all.push(...page.rows);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor && all.length < MAX_EXPORT_ROWS);
 
     const header = ["date", "type", "category", "description", "amount", "source"];
     const lines = [header.join(",")];
-    for (const row of rows) {
+    for (const row of all) {
       lines.push(
         [
           row.transaction_date,

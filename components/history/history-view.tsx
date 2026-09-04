@@ -40,6 +40,19 @@ export function HistoryView({
   const [editing, setEditing] = useState<HistoryRow | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
+  // Server-rendered first page; "load more" APPENDS via the search API so
+  // the visible rows never disappear. When the server list changes (filters,
+  // refresh after edit/delete), the appended pages are dropped.
+  const [allRows, setAllRows] = useState<HistoryRow[]>(rows);
+  const [cursor, setCursor] = useState<HistoryCursor | null>(nextCursor);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [serverState, setServerState] = useState({ rows, nextCursor });
+  if (serverState.rows !== rows || serverState.nextCursor !== nextCursor) {
+    setServerState({ rows, nextCursor });
+    setAllRows(rows);
+    setCursor(nextCursor);
+  }
+
   const [from, setFrom] = useState(filters.from);
   const [to, setTo] = useState(filters.to);
   const [type, setType] = useState(filters.type ?? "");
@@ -64,11 +77,28 @@ export function HistoryView({
     router.push(`/history?${buildQuery()}`);
   };
 
-  const loadMore = () => {
-    if (!nextCursor) return;
-    router.push(
-      `/history?${buildQuery({ cursor: `${nextCursor.createdAt}|${nextCursor.id}` })}`,
-    );
+  const loadMore = async () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const response = await fetch(
+        `/api/transactions/search?${buildQuery({
+          cursor: `${cursor.createdAt}|${cursor.id}`,
+        })}`,
+      );
+      if (response.ok) {
+        const payload = (await response.json()) as {
+          data: HistoryRow[];
+          nextCursor: HistoryCursor | null;
+        };
+        setAllRows((prev) => [...prev, ...payload.data]);
+        setCursor(payload.nextCursor);
+      }
+    } catch {
+      // Keep the current list; the user can retry.
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -240,10 +270,10 @@ export function HistoryView({
 
         <div className="rounded-xl border border-zinc-200 bg-white p-4">
           <ul className="flex flex-col divide-y divide-zinc-100">
-            {rows.length === 0 && (
+            {allRows.length === 0 && (
               <li className="py-2 text-xs text-zinc-400">{t.dashboard.empty}</li>
             )}
-            {rows.map((row) => (
+            {allRows.map((row) => (
               <li
                 key={row.id}
                 className="flex items-center gap-2 py-2 text-xs"
@@ -313,16 +343,17 @@ export function HistoryView({
           </ul>
 
           <div className="mt-3 flex justify-center">
-            {nextCursor ? (
+            {cursor ? (
               <button
                 type="button"
                 onClick={loadMore}
-                className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:text-zinc-900"
+                disabled={loadingMore}
+                className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:text-zinc-900 disabled:opacity-60"
               >
-                {t.history.loadMore}
+                {loadingMore ? "..." : t.history.loadMore}
               </button>
             ) : (
-              rows.length > 0 && (
+              allRows.length > 0 && (
                 <span className="text-xs text-zinc-400">{t.history.noMore}</span>
               )
             )}

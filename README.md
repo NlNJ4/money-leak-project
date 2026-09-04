@@ -9,7 +9,7 @@ A bilingual (Thai/English) personal finance tracker: a Next.js web dashboard plu
 - **LINE Messaging API** — signature-verified webhook, durable job queue
 - **Gemini API** — fallback parser behind a local rule-based parser
 - **Vercel** — git-linked production deploys; **Supabase pg_cron** — every-minute worker sweep
-- **Vitest** — 68 unit tests; **GitHub Actions** — lint / typecheck / test / build on every push
+- **Vitest** — 76 unit tests; **GitHub Actions** — lint / typecheck / test / build on every push
 
 ## Environment variables
 
@@ -50,7 +50,16 @@ Migrations are forward-only. If a migration turns out wrong, write a corrective 
 
 ### Scheduled worker (retry sweep)
 
-Retries must run even when no new LINE message arrives, so a Supabase pg_cron job calls `POST /api/line/worker` every minute with an `x-worker-token` header. The token is generated in-database (`line_worker_tokens`, service-role only) and the schedule reads it dynamically — rotation is a single `UPDATE`. Verify with `select * from cron.job_run_details order by runid desc limit 5;`. `GET /api/line/worker` (same token) returns dead-letter rows and queue depth for inspection.
+Retries must run even when no new LINE message arrives, so a Supabase pg_cron job calls `POST /api/line/worker` every minute with an `x-worker-token` header. The token lives in `line_worker_tokens` (service-role only) and is auto-bootstrapped by a migration on fresh installs; the schedule reads it dynamically, so rotation is a single `UPDATE`. Verify with `select * from cron.job_run_details order by runid desc limit 5;`. `GET /api/line/worker` (same token) returns dead-letter rows and queue depth for inspection.
+
+`pg_net` is asynchronous — a cron run succeeding only means the HTTP request was queued. Check the actual worker responses with:
+
+```sql
+select id, status_code, timed_out, collect_time
+from net._http_response
+order by collect_time desc
+limit 20;
+```
 
 To recreate the schedule on a fresh database:
 

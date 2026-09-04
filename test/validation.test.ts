@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createTransactionSchema,
+  historyFilterSchema,
   idParamSchema,
   transactionFilterSchema,
   updateTransactionSchema,
@@ -90,5 +91,24 @@ describe("idParamSchema", () => {
     expect(idParamSchema.safeParse("1b671a64-40d5-491e-99b0-da01ff1f3341").success).toBe(true);
     expect(idParamSchema.safeParse("not-a-uuid").success).toBe(false);
     expect(idParamSchema.safeParse("1; drop table transactions").success).toBe(false);
+  });
+});
+
+describe("historyFilterSchema", () => {
+  const valid = { from: "2026-01-01", to: "2026-01-31" };
+
+  it("inherits the strict range rules (real dates, from <= to)", () => {
+    expect(historyFilterSchema.safeParse(valid).success).toBe(true);
+    expect(historyFilterSchema.safeParse({ ...valid, to: "2026-99-99" }).success).toBe(false);
+    expect(historyFilterSchema.safeParse({ from: "2026-02-30", to: "2026-03-01" }).success).toBe(false);
+    expect(historyFilterSchema.safeParse({ from: "2026-03-01", to: "2026-01-01" }).success).toBe(false);
+  });
+
+  it("validates the optional facets", () => {
+    expect(historyFilterSchema.safeParse({ ...valid, type: "expense" }).success).toBe(true);
+    expect(historyFilterSchema.safeParse({ ...valid, type: "transfer" }).success).toBe(false);
+    expect(historyFilterSchema.safeParse({ ...valid, source: "line" }).success).toBe(true);
+    expect(historyFilterSchema.safeParse({ ...valid, source: "fax" }).success).toBe(false);
+    expect(historyFilterSchema.safeParse({ ...valid, q: "x".repeat(101) }).success).toBe(false);
   });
 });

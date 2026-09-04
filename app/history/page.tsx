@@ -1,7 +1,7 @@
 import { HistoryView } from "@/components/history/history-view";
 import { yearAgoRange } from "@/lib/date";
 import { getAuthContext } from "@/lib/supabase/server";
-import { listCategories, listHistory } from "@/lib/transactions";
+import { listCategories, listHistory, parseHistoryCursor } from "@/lib/transactions";
 import { historyFilterSchema } from "@/lib/validation";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -32,14 +32,7 @@ export default async function HistoryPage({
     ? parsed.data
     : { from: defaults.from, to: defaults.to };
 
-  const rawCursor = one("cursor");
-  let cursor: { createdAt: string; id: string } | undefined;
-  if (rawCursor && rawCursor.includes("|")) {
-    const [createdAt, id] = rawCursor.split("|");
-    if (createdAt && id) {
-      cursor = { createdAt, id };
-    }
-  }
+  const cursor = parseHistoryCursor(one("cursor"));
 
   const [auth, categories, page] = await Promise.all([
     getAuthContext(),
