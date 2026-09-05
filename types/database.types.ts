@@ -280,6 +280,39 @@ export type Database = {
         }
         Relationships: []
       }
+      line_metrics: {
+        Row: {
+          day: string
+          key: string
+          count: number
+        }
+        Insert: {
+          day: string
+          key: string
+          count?: number
+        }
+        Update: {
+          day?: string
+          key?: string
+          count?: number
+        }
+        Relationships: []
+      }
+      worker_heartbeat: {
+        Row: {
+          id: number
+          last_run_at: string
+        }
+        Insert: {
+          id?: number
+          last_run_at?: string
+        }
+        Update: {
+          id?: number
+          last_run_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -350,6 +383,16 @@ export type Database = {
           p_line_user_id: string
         }
         Returns: boolean
+      }
+      bump_metrics: {
+        Args: {
+          p_keys: string[]
+        }
+        Returns: undefined
+      }
+      touch_heartbeat: {
+        Args: Record<string, never>
+        Returns: undefined
       }
       save_line_transaction: {
         Args: {

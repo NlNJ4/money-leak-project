@@ -1,6 +1,7 @@
 import { GeminiParser } from "@/lib/ai/gemini";
 import { parseWithConfidence } from "@/lib/ai/rule-parser";
 import type { ParsedTransaction } from "@/lib/ai/provider";
+import { recordMetrics } from "@/lib/observability";
 
 // Rule-parser results at or above this confidence are trusted without a
 // Gemini call; anything lower (or unparseable) escalates to the AI chain.
@@ -19,6 +20,7 @@ export async function parseTransaction(
       confidence: rule.confidence,
       durationMs: Date.now() - startedAt,
     });
+    void recordMetrics(["parser_rule_hit"]);
     return rule.parsed;
   }
 
@@ -30,6 +32,7 @@ export async function parseTransaction(
       durationMs: Date.now() - startedAt,
       ruleConfidence: rule.confidence,
     });
+    void recordMetrics([result ? "parser_gemini_hit" : "parser_gemini_unknown"]);
     return result;
   } catch (err) {
     logParserEvent({
@@ -39,6 +42,7 @@ export async function parseTransaction(
       ruleConfidence: rule.confidence,
       error: err instanceof Error ? err.name : "unknown",
     });
+    void recordMetrics(["parser_gemini_error"]);
     // The webhook layer retries durable jobs; propagation (not a fake
     // "unknown") keeps that recovery possible.
     throw err;

@@ -2,6 +2,12 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleLineMessage } from "@/lib/line-bot";
 import { lineRetryKey, pushToUser, replyToUser } from "@/lib/line";
+import {
+  logJobEvent,
+  pushOwnerAlertOnce,
+  queueHealth,
+  recordMetrics,
+} from "@/lib/observability";
 
 // Durable LINE message processing. The webhook persists jobs BEFORE
 // acknowledging LINE (see app/api/line/webhook/route.ts); this module claims
@@ -80,6 +86,14 @@ export async function processDueLineJobs(
   const maxJobs = Math.max(1, Math.floor(limit));
   let processed = 0;
 
+  // Heartbeat first: a fresh timestamp every sweep is how "the scheduled
+  // worker stopped" becomes detectable.
+  try {
+    await admin.rpc("touch_heartbeat");
+  } catch (err) {
+    console.error("[line-jobs] heartbeat failed:", (err as Error).message);
+  }
+
   while (processed < maxJobs && Date.now() < deadline) {
     // Claim exactly the job we are about to run. Claiming a batch here would
     // increment attempts and mark later rows as processing even though this
@@ -99,11 +113,42 @@ export async function processDueLineJobs(
     processed += 1;
   }
 
+  if (processed > 0) {
+    await recordMetrics(["jobs_processed"]);
+  }
+  await evaluateAlerts();
+
   return processed;
+}
+
+// Sweep-level alert conditions; each pushes to the owner at most once per
+// day (deduped inside pushOwnerAlertOnce).
+async function evaluateAlerts(): Promise<void> {
+  try {
+    const health = await queueHealth();
+    if ((health.depth["dead"] ?? 0) > 0) {
+      await pushOwnerAlertOnce(
+        "dead_jobs",
+        `มีรายการ LINE ค้างสถานะ dead (${health.depth["dead"]} รายการ) ตรวจสอบได้ที่ /api/line/health`,
+      );
+    }
+    if (
+      health.oldestPendingSeconds !== null &&
+      health.oldestPendingSeconds > 300
+    ) {
+      await pushOwnerAlertOnce(
+        "stale_pending",
+        `รายการที่รออยู่เก่าสุดค้างมา ${Math.round(health.oldestPendingSeconds / 60)} นาทีแล้ว`,
+      );
+    }
+  } catch (err) {
+    console.error("[line-jobs] alert evaluation failed:", (err as Error).message);
+  }
 }
 
 async function runJob(job: LineJobRow): Promise<void> {
   const admin = createAdminClient();
+  const startedAt = Date.now();
 
   // Delivery-only retries reuse the stored reply; processing never runs
   // twice for the same job. Should a crash land between a mutating command
@@ -116,6 +161,13 @@ async function runJob(job: LineJobRow): Promise<void> {
       reply = await handleLineMessage(job.line_user_id, job.text ?? "", job.id);
     } catch (err) {
       console.error("[line-jobs] processing failed:", job.id, err);
+      logJobEvent({
+        jobId: job.id,
+        attempt: job.attempts,
+        phase: "processing_failed",
+        durationMs: Date.now() - startedAt,
+      });
+      await recordMetrics(["processing_fail"]);
       await markRetry(job, "processing", err);
       return;
     }
@@ -127,15 +179,23 @@ async function runJob(job: LineJobRow): Promise<void> {
     if (replyError) {
       console.error("[line-jobs] reply persist failed:", job.id, replyError.message);
     }
+    logJobEvent({
+      jobId: job.id,
+      attempt: job.attempts,
+      phase: "processed",
+      durationMs: Date.now() - startedAt,
+    });
   }
 
   // One stable retry key per job: LINE deduplicates on it (supported on
   // both reply and push), so a re-sent delivery after an ambiguous timeout
   // cannot deliver twice (409 = already accepted).
   const retryKey = lineRetryKey(job.id);
+  const via: "reply" | "push" =
+    job.attempts <= 1 && job.reply_token ? "reply" : "push";
   try {
-    if (job.attempts <= 1 && job.reply_token) {
-      await replyToUser(job.reply_token, reply, retryKey);
+    if (via === "reply") {
+      await replyToUser(job.reply_token!, reply, retryKey);
     } else {
       // Retry-time replies push instead: the reply token is single-use and
       // long expired by now.
@@ -143,9 +203,26 @@ async function runJob(job: LineJobRow): Promise<void> {
     }
   } catch (err) {
     console.error("[line-jobs] delivery failed:", job.id, err);
+    logJobEvent({
+      jobId: job.id,
+      attempt: job.attempts,
+      phase: "delivery_failed",
+      durationMs: Date.now() - startedAt,
+      via,
+    });
+    await recordMetrics([`delivery_fail_${via}`]);
     await markRetry(job, "delivery", err);
     return;
   }
+
+  logJobEvent({
+    jobId: job.id,
+    attempt: job.attempts,
+    phase: "delivered",
+    durationMs: Date.now() - startedAt,
+    via,
+  });
+  await recordMetrics([`delivery_ok_${via}`]);
 
   // Completed: clear ALL sensitive payload — message text, reply token,
   // and the financial reply content.
@@ -187,6 +264,8 @@ async function markRetry(
       `[line-jobs] job ${job.id} dead-lettered after ${job.attempts} attempts (${phase})`,
       error?.message ?? "",
     );
+    logJobEvent({ jobId: job.id, attempt: job.attempts, phase: "dead" });
+    await recordMetrics(["jobs_dead"]);
 
     // A processing failure means the user never heard anything back — send
     // one best-effort apology so they are not left silent. Delivery
