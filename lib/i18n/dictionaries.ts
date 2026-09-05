@@ -17,6 +17,7 @@ const th = {
   errors: {
     generic: "เกิดข้อผิดพลาดในการโหลดข้อมูล",
     retry: "ลองอีกครั้ง",
+    actionFailed: "ทำรายการไม่สำเร็จ กรุณาลองอีกครั้ง",
   },
   history: {
     title: "ประวัติรายการ",
@@ -30,6 +31,8 @@ const th = {
     export: "ส่งออก CSV",
     loadMore: "โหลดเพิ่ม",
     noMore: "ไม่มีรายการเพิ่มเติมแล้ว",
+    loadFailed: "โหลดไม่สำเร็จ",
+    truncated: "ไฟล์ถูกตัดที่ 5,000 แถวแรก — กรองช่วงวันที่ให้แคบลงเพื่อได้ข้อมูลครบ",
   },
   dashboard: {
     title: "ภาพรวม",
@@ -104,6 +107,7 @@ const en: Dictionary = {
   errors: {
     generic: "Something went wrong while loading data",
     retry: "Try again",
+    actionFailed: "The action failed. Please try again.",
   },
   history: {
     title: "Transaction history",
@@ -117,6 +121,8 @@ const en: Dictionary = {
     export: "Export CSV",
     loadMore: "Load more",
     noMore: "No more transactions",
+    loadFailed: "Could not load more",
+    truncated: "File truncated at the first 5,000 rows — narrow the date range for complete data",
   },
   dashboard: {
     title: "Overview",

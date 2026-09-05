@@ -23,7 +23,7 @@ export function AddTransactionForm({
   onCancel,
 }: {
   categories: Category[];
-  onSaved: () => void;
+  onSaved?: (saved: EditableTransaction) => void;
   initial?: EditableTransaction;
   onCancel?: () => void;
 }) {
@@ -82,7 +82,14 @@ export function AddTransactionForm({
         setAmount("");
         setDescription("");
       }
-      onSaved();
+      onSaved?.({
+        id: initial?.id ?? "",
+        type,
+        amount: Number(amount),
+        category,
+        description,
+        date,
+      });
     } catch {
       setError(t.dashboard.errors.generic);
     } finally {

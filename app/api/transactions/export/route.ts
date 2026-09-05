@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
       q: parsed.data.q,
     };
 
-    const all = await collectHistoryRows((cursor, limit) =>
+    const { rows: all, truncated } = await collectHistoryRows((cursor, limit) =>
       listHistory(filters, cursor, limit),
     );
 
@@ -64,6 +64,8 @@ export async function GET(request: NextRequest) {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
+        // Lets the UI warn that the export stopped at the row cap.
+        "X-Rows-Truncated": truncated ? "1" : "0",
       },
     });
   } catch (err) {

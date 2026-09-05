@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { startTransition, useOptimistic, useState } from "react";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
 import { useI18n } from "@/lib/i18n/provider";
 import { formatAmountSigned, formatCurrency, formatDate } from "@/lib/format";
@@ -20,6 +20,26 @@ import { DailyChart } from "@/components/dashboard/daily-chart";
 import { ConnectLine } from "@/components/dashboard/connect-line";
 
 type Period = "today" | "week" | "month" | "custom";
+
+// Optimistic list actions: add prepends, edit patches, delete removes —
+// the server refresh reconciles afterwards.
+type RecentAction =
+  | { kind: "add"; row: TransactionRow }
+  | { kind: "edit"; id: string; patch: Partial<TransactionRow> }
+  | { kind: "delete"; id: string };
+
+function recentReducer(rows: TransactionRow[], action: RecentAction) {
+  switch (action.kind) {
+    case "add":
+      return [action.row, ...rows];
+    case "edit":
+      return rows.map((row) =>
+        row.id === action.id ? { ...row, ...action.patch } : row,
+      );
+    case "delete":
+      return rows.filter((row) => row.id !== action.id);
+  }
+}
 
 export function DashboardView({
   data,
@@ -40,6 +60,12 @@ export function DashboardView({
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<TransactionRow | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const [recentRows, applyRecent] = useOptimistic(
+    data.recent,
+    recentReducer,
+  );
 
   const categoryLabel = (c: { name_th: string; name_en: string }) =>
     locale === "th" ? c.name_th : c.name_en;
@@ -50,17 +76,21 @@ export function DashboardView({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleDelete = async (id: string) => {
-    try {
-      const response = await fetch(`/api/transactions/${id}`, {
-        method: "DELETE",
-      });
-      if (response.ok) {
+  const handleDelete = (id: string) => {
+    setActionError(null);
+    startTransition(async () => {
+      applyRecent({ kind: "delete", id });
+      try {
+        const response = await fetch(`/api/transactions/${id}`, {
+          method: "DELETE",
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        router.refresh();
+      } catch {
+        setActionError(t.errors.actionFailed);
         router.refresh();
       }
-    } catch {
-      // Network failure: leave the row; the user can retry.
-    }
+    });
   };
 
   const cards = [
@@ -125,9 +155,30 @@ export function DashboardView({
         {formOpen && (
           <AddTransactionForm
             categories={categories}
-            onSaved={() => {
+            onSaved={(saved) => {
               setFormOpen(false);
-              router.refresh();
+              const category = categories.find((c) => c.slug === saved.category);
+              startTransition(() => {
+                applyRecent({
+                  kind: "add",
+                  row: {
+                    id: `temp-${saved.date}-${saved.amount}-${saved.category}`,
+                    type: saved.type,
+                    amount: saved.amount,
+                    description: saved.description,
+                    transaction_date: saved.date,
+                    category: category
+                      ? {
+                          slug: category.slug,
+                          name_th: category.name_th,
+                          name_en: category.name_en,
+                          icon: category.icon,
+                        }
+                      : null,
+                  },
+                });
+                router.refresh();
+              });
             }}
           />
         )}
@@ -137,9 +188,22 @@ export function DashboardView({
             key={editing.id}
             categories={categories}
             initial={toEditable(editing)}
-            onSaved={() => {
+            onSaved={(saved) => {
+              const edited = editing;
               setEditing(null);
-              router.refresh();
+              startTransition(() => {
+                applyRecent({
+                  kind: "edit",
+                  id: edited.id,
+                  patch: {
+                    type: saved.type,
+                    amount: saved.amount,
+                    description: saved.description,
+                    transaction_date: saved.date,
+                  },
+                });
+                router.refresh();
+              });
             }}
             onCancel={() => setEditing(null)}
           />
@@ -197,10 +261,16 @@ export function DashboardView({
 
         <DailyChart data={data.dailyTotals} />
 
+        {actionError && (
+          <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            {actionError}
+          </p>
+        )}
+
         <RecentCard
           title={t.dashboard.recentTransactions}
           empty={t.dashboard.empty}
-          rows={data.recent}
+          rows={recentRows}
           categoryLabel={categoryLabel}
           onEdit={startEditing}
           onDelete={handleDelete}
@@ -336,7 +406,7 @@ function RecentCard({
                   type="button"
                   aria-label={t.dashboard.recent.edit}
                   onClick={() => onEdit(row)}
-                  className="rounded-md px-1.5 py-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                  className="rounded-md min-h-9 min-w-9 px-2 py-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
                 >
                   ✎
                 </button>
@@ -344,7 +414,7 @@ function RecentCard({
                   type="button"
                   aria-label={t.dashboard.recent.delete}
                   onClick={() => setConfirmId(row.id)}
-                  className="rounded-md px-1.5 py-1 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                  className="rounded-md min-h-9 min-w-9 px-2 py-1.5 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
                 >
                   🗑
                 </button>

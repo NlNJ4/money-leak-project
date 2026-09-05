@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
 import { useI18n } from "@/lib/i18n/provider";
 import { formatAmountSigned, formatDate } from "@/lib/format";
@@ -46,6 +46,7 @@ export function HistoryView({
   const [allRows, setAllRows] = useState<HistoryRow[]>(rows);
   const [cursor, setCursor] = useState<HistoryCursor | null>(nextCursor);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [serverState, setServerState] = useState({ rows, nextCursor });
   if (serverState.rows !== rows || serverState.nextCursor !== nextCursor) {
     setServerState({ rows, nextCursor });
@@ -59,6 +60,12 @@ export function HistoryView({
   const [category, setCategory] = useState(filters.category ?? "");
   const [source, setSource] = useState(filters.source ?? "");
   const [q, setQ] = useState(filters.q ?? "");
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+
+  // In-flight load-more requests are aborted when filters change or a new
+  // page load starts, so stale responses can never land in the list.
+  const loadAbort = useRef<AbortController | null>(null);
 
   const categoryLabel = (c: { name_th: string; name_en: string }) =>
     locale === "th" ? c.name_th : c.name_en;
@@ -72,30 +79,52 @@ export function HistoryView({
     return params.toString();
   };
 
+  // Debounced search: typing navigates only after a pause.
+  useEffect(() => {
+    if (q === (filters.q ?? "")) return;
+    const timer = setTimeout(() => {
+      router.replace(`/history?${buildQuery()}`, { scroll: false });
+    }, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
   const applyFilters = (event: React.FormEvent) => {
     event.preventDefault();
+    loadAbort.current?.abort();
     router.push(`/history?${buildQuery()}`);
   };
 
   const loadMore = async () => {
     if (!cursor || loadingMore) return;
     setLoadingMore(true);
+    setLoadFailed(false);
+    loadAbort.current?.abort();
+    const controller = new AbortController();
+    loadAbort.current = controller;
     try {
       const response = await fetch(
         `/api/transactions/search?${buildQuery({
           cursor: `${cursor.createdAt}|${cursor.id}`,
         })}`,
+        { signal: controller.signal },
       );
       if (response.ok) {
         const payload = (await response.json()) as {
           data: HistoryRow[];
           nextCursor: HistoryCursor | null;
         };
-        setAllRows((prev) => [...prev, ...payload.data]);
+        setAllRows((prev) => {
+          // Deduplicate by id: server refreshes can overlap appended pages.
+          const seen = new Set(prev.map((row) => row.id));
+          return [...prev, ...payload.data.filter((row) => !seen.has(row.id))];
+        });
         setCursor(payload.nextCursor);
+      } else {
+        setLoadFailed(true);
       }
-    } catch {
-      // Keep the current list; the user can retry.
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") setLoadFailed(true);
     } finally {
       setLoadingMore(false);
     }
@@ -107,6 +136,7 @@ export function HistoryView({
         method: "DELETE",
       });
       if (response.ok) {
+        setAllRows((prev) => prev.filter((row) => row.id !== id));
         router.refresh();
       }
     } catch {
@@ -114,7 +144,35 @@ export function HistoryView({
     }
   };
 
-  const exportHref = `/api/transactions/export?${buildQuery()}`;
+  // Fetch (not plain link) so the truncation header can surface a warning
+  // before the file downloads.
+  const exportCsv = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportNotice(null);
+    try {
+      const response = await fetch(`/api/transactions/export?${buildQuery()}`);
+      if (!response.ok) throw new Error(String(response.status));
+      if (response.headers.get("X-Rows-Truncated") === "1") {
+        setExportNotice(t.history.truncated);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download =
+        response.headers
+          .get("Content-Disposition")
+          ?.match(/filename="(.+)"/)?.[1] ?? "transactions.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportNotice(t.errors.actionFailed);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const selectClass =
     "rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-xs";
 
@@ -158,12 +216,21 @@ export function HistoryView({
               </span>
             ) : null}
           </h1>
-          <a
-            href={exportHref}
-            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
-          >
-            ⬇ {t.history.export}
-          </a>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={exportCsv}
+              disabled={exporting}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-60"
+            >
+              {exporting ? "..." : `⬇ ${t.history.export}`}
+            </button>
+            {exportNotice && (
+              <p className="max-w-64 text-right text-xs text-amber-600">
+                {exportNotice}
+              </p>
+            )}
+          </div>
         </div>
 
         <form
@@ -324,7 +391,7 @@ export function HistoryView({
                         window.scrollTo({ top: 0, behavior: "smooth" });
                         setEditing(row);
                       }}
-                      className="rounded-md px-1.5 py-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                      className="rounded-md min-h-9 min-w-9 px-2 py-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
                     >
                       ✎
                     </button>
@@ -332,7 +399,7 @@ export function HistoryView({
                       type="button"
                       aria-label={t.dashboard.recent.delete}
                       onClick={() => setConfirmId(row.id)}
-                      className="rounded-md px-1.5 py-1 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                      className="rounded-md min-h-9 min-w-9 px-2 py-1.5 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
                     >
                       🗑
                     </button>
@@ -342,16 +409,30 @@ export function HistoryView({
             ))}
           </ul>
 
-          <div className="mt-3 flex justify-center">
+          <div className="mt-3 flex flex-col items-center gap-2">
             {cursor ? (
-              <button
-                type="button"
-                onClick={loadMore}
-                disabled={loadingMore}
-                className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:text-zinc-900 disabled:opacity-60"
-              >
-                {loadingMore ? "..." : t.history.loadMore}
-              </button>
+              <span className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="min-h-9 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-medium text-zinc-600 shadow-sm transition-colors hover:text-zinc-900 disabled:opacity-60"
+                >
+                  {loadingMore ? "..." : t.history.loadMore}
+                </button>
+                {loadFailed && (
+                  <span className="flex items-center gap-2 text-xs text-rose-600">
+                    {t.history.loadFailed}
+                    <button
+                      type="button"
+                      onClick={loadMore}
+                      className="min-h-9 rounded-md border border-rose-200 bg-white px-2.5 py-1 font-medium hover:bg-rose-50"
+                    >
+                      {t.errors.retry}
+                    </button>
+                  </span>
+                )}
+              </span>
             ) : (
               allRows.length > 0 && (
                 <span className="text-xs text-zinc-400">{t.history.noMore}</span>

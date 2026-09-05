@@ -14,19 +14,29 @@ type HistoryPageLoader = (
   limit: number,
 ) => Promise<HistoryPageData>;
 
+export type CollectHistoryResult = {
+  rows: HistoryRow[];
+  // True when pagination was cut short by the row cap (more data exists).
+  truncated: boolean;
+};
+
 export async function collectHistoryRows(
   loadPage: HistoryPageLoader,
   maxRows = MAX_EXPORT_ROWS,
   pageSize = EXPORT_PAGE_SIZE,
-): Promise<HistoryRow[]> {
+): Promise<CollectHistoryResult> {
   const rows: HistoryRow[] = [];
   const seenCursors = new Set<string>();
   let cursor: HistoryCursor | undefined;
+  // The most recent server answer: non-null here means more data existed
+  // when we stopped, i.e. the row cap truncated the export.
+  let latestNext: HistoryCursor | null = null;
 
   while (rows.length < maxRows) {
     const limit = Math.min(pageSize, maxRows - rows.length);
     const page = await loadPage(cursor, limit);
     rows.push(...page.rows.slice(0, limit));
+    latestNext = page.nextCursor ?? null;
 
     if (!page.nextCursor || page.rows.length === 0) break;
 
@@ -36,5 +46,5 @@ export async function collectHistoryRows(
     cursor = page.nextCursor;
   }
 
-  return rows;
+  return { rows, truncated: latestNext !== null };
 }

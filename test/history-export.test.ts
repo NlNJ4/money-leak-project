@@ -50,17 +50,23 @@ function hostedPageLoader(total: number, requested: number[]) {
 describe("collectHistoryRows", () => {
   it("keeps the look-ahead row below Supabase's 1,000-row cap", async () => {
     const requested: number[] = [];
-    const rows = await collectHistoryRows(hostedPageLoader(1_500, requested));
+    const { rows, truncated } = await collectHistoryRows(
+      hostedPageLoader(1_500, requested),
+    );
 
     expect(rows).toHaveLength(1_500);
     expect(requested.every((limit) => limit <= EXPORT_PAGE_SIZE)).toBe(true);
+    expect(truncated).toBe(false);
   });
 
   it("stops exactly at the export cap without overshooting", async () => {
     const requested: number[] = [];
-    const rows = await collectHistoryRows(hostedPageLoader(6_000, requested));
+    const { rows, truncated } = await collectHistoryRows(
+      hostedPageLoader(6_000, requested),
+    );
 
     expect(rows).toHaveLength(MAX_EXPORT_ROWS);
     expect(requested.at(-1)).toBe(5);
+    expect(truncated).toBe(true);
   });
 });
