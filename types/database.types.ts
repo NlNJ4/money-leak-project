@@ -313,6 +313,63 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_usage: {
+        Row: {
+          day: string
+          requests: number
+        }
+        Insert: {
+          day: string
+          requests?: number
+        }
+        Update: {
+          day?: string
+          requests?: number
+        }
+        Relationships: []
+      }
+      ai_circuit: {
+        Row: {
+          id: number
+          open_until: string | null
+          consecutive_quota_errors: number
+        }
+        Insert: {
+          id?: number
+          open_until?: string | null
+          consecutive_quota_errors?: number
+        }
+        Update: {
+          id?: number
+          open_until?: string | null
+          consecutive_quota_errors?: number
+        }
+        Relationships: []
+      }
+      line_pending_confirms: {
+        Row: {
+          event_key: string
+          user_id: string
+          payload: Json
+          created_at: string
+          expires_at: string
+        }
+        Insert: {
+          event_key: string
+          user_id: string
+          payload: Json
+          created_at?: string
+          expires_at?: string
+        }
+        Update: {
+          event_key?: string
+          user_id?: string
+          payload?: Json
+          created_at?: string
+          expires_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -393,6 +450,24 @@ export type Database = {
       touch_heartbeat: {
         Args: Record<string, never>
         Returns: undefined
+      }
+      try_acquire_ai_slot: {
+        Args: {
+          p_limit: number
+        }
+        Returns: string
+      }
+      note_ai_outcome: {
+        Args: {
+          p_quota_err: boolean
+        }
+        Returns: undefined
+      }
+      take_pending_confirm: {
+        Args: {
+          p_user_id: string
+        }
+        Returns: Json
       }
       save_line_transaction: {
         Args: {

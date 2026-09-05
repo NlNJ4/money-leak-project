@@ -41,9 +41,13 @@ export async function wipeLocalData(): Promise<void> {
   await admin.from("line_jobs").delete().neq("id", "");
   await admin.from("webhook_events").delete().neq("id", "");
   await admin.from("line_redeem_attempts").delete().neq("line_user_id", "");
+  await admin.from("line_pending_confirms").delete().neq("event_key", "");
   await admin.from("deleted_transaction_staging").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await admin.from("transactions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await admin.from("linking_codes").delete().neq("code", "");
+  await admin.from("line_metrics").delete().neq("key", "");
+  await admin.from("ai_usage").delete().neq("day", "1900-01-01");
+  await admin.from("ai_circuit").delete().neq("id", 0);
 
   const { data: users } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
   for (const user of users?.users ?? []) {

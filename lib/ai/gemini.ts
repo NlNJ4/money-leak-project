@@ -101,7 +101,10 @@ function buildPrompt(text: string): string {
 }
 
 export class GeminiParser implements TransactionParser {
-  async parseTransaction(text: string): Promise<ParsedTransaction | null> {
+  async parseTransaction(
+    text: string,
+    opts: { liteFirst?: boolean } = {},
+  ): Promise<ParsedTransaction | null> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY is not configured");
@@ -109,13 +112,14 @@ export class GeminiParser implements TransactionParser {
 
     const primary = process.env.GEMINI_MODEL || DEFAULT_MODEL;
     const configuredFallback = process.env.GEMINI_FALLBACK_MODEL;
-    const models = [
-      ...new Set(
-        [primary, configuredFallback, DEFAULT_FALLBACK_MODEL].filter(
-          (model): model is string => Boolean(model),
-        ),
-      ),
-    ];
+    const chain = [primary, configuredFallback, DEFAULT_FALLBACK_MODEL].filter(
+      (model): model is string => Boolean(model),
+    );
+    // Simple extractions try the inexpensive Flash-Lite first; the full
+    // chain stays behind it as fallback.
+    const models = opts.liteFirst
+      ? [...new Set([DEFAULT_FALLBACK_MODEL, ...chain])]
+      : [...new Set(chain)];
 
     let lastError: unknown;
     for (const model of models) {

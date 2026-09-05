@@ -1,6 +1,7 @@
 import "server-only";
-import { parseTransaction } from "@/lib/ai/pipeline";
+import { parseTransactionWithStatus } from "@/lib/ai/pipeline";
 import type { ParsedTransaction } from "@/lib/ai/provider";
+import { recordMetrics } from "@/lib/observability";
 import { monthRange, todayISO } from "@/lib/date";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -452,18 +453,102 @@ export async function handleLineMessage(
       commandKey,
     );
   }
+  if (collapsed === "ใช่" || collapsed === "ไม่ใช่") {
+    return resolvePendingConfirm(userId, commandKey, collapsed === "ใช่");
+  }
   if (trimmed === "ช่วย" || trimmed.toLowerCase() === "help") {
     return HELP_TEXT;
   }
 
-  // Provider/network failures propagate so the queue retries the job; a
-  // definitive null (text is not a transaction) is a permanent outcome and
-  // becomes a user-facing reply below.
-  const parsed = await parseTransaction(trimmed);
+  // Provider/network failures propagate so the queue retries the job.
+  // Statuses: rule/gemini → save; unknown → help; quota/circuit → offer
+  // the mid-confidence local guess for confirmation instead of guessing.
+  const status = await parseTransactionWithStatus(trimmed);
 
-  if (!parsed) {
+  if (status.via === "quota" || status.via === "circuit") {
+    if (status.ruleParsed) {
+      return askPendingConfirm(userId, status.ruleParsed, commandKey);
+    }
+    return "ระบบวิเคราะห์ข้อความไม่พร้อมใช้งานชั่วคราวครับ ลองส่งใหม่อีกครั้งในภายหลังนะครับ";
+  }
+
+  if (status.via === "unknown") {
     return "ไม่เข้าใจข้อความครับ ลองแบบนี้ดู: กินข้าว 120 หรือพิมพ์ ช่วย เพื่อดูตัวอย่าง";
   }
 
-  return saveTransaction(userId, parsed, eventKey);
+  return saveTransaction(userId, status.parsed, eventKey);
+}
+
+// ---- ambiguous-confirmation flow (AI unavailable, mid-confidence guess) ----
+
+async function askPendingConfirm(
+  userId: string,
+  guess: ParsedTransaction,
+  commandKey: string,
+): Promise<string> {
+  if (!commandKey) {
+    // Manual/test invocation: no durable event key to bind the confirm to.
+    return "ระบบวิเคราะห์ไม่พร้อมใช้งานชั่วคราวครับ ลองส่งใหม่ภายหลังนะครับ";
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.from("line_pending_confirms").upsert(
+    {
+      event_key: commandKey,
+      user_id: userId,
+      payload: guess,
+      expires_at: new Date(Date.now() + 2 * 60_000).toISOString(),
+    },
+    { onConflict: "event_key" },
+  );
+
+  if (error) {
+    throw new Error(`pending confirm insert failed: ${error.message}`);
+  }
+  void recordMetrics(["confirm_asked"]);
+
+  const { data: category } = await admin
+    .from("categories")
+    .select("icon, name_th")
+    .eq("slug", guess.category)
+    .single();
+
+  return [
+    "🤔 เข้าใจว่าน่าจะเป็นรายการนี้ (ระบบ AI ไม่พร้อมใช้งานชั่วคราว)",
+    "",
+    `${category?.icon ?? "📦"} ${category?.name_th ?? guess.category}${guess.description ? ` · ${guess.description}` : ""}`,
+    `${fmt(guess.amount)} บาท`,
+    "",
+    "พิมพ์ ใช่ เพื่อบันทึก หรือ ไม่ใช่ เพื่อข้าม (ภายใน 2 นาที)",
+  ].join("\n");
+}
+
+async function resolvePendingConfirm(
+  userId: string,
+  _commandKey: string,
+  accepted: boolean,
+): Promise<string> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("take_pending_confirm", {
+    p_user_id: userId,
+  });
+
+  if (error) {
+    throw new Error(`take_pending_confirm failed: ${error.message}`);
+  }
+  if (!data) {
+    return "ไม่มีรายการที่รอยืนยันครับ";
+  }
+
+  if (!accepted) {
+    void recordMetrics(["confirm_no"]);
+    return "ข้ามรายการนี้แล้วครับ";
+  }
+
+  void recordMetrics(["confirm_yes"]);
+  const { event_key: eventKey, payload } = data as {
+    event_key: string;
+    payload: ParsedTransaction;
+  };
+  return saveTransaction(userId, payload, eventKey);
 }
