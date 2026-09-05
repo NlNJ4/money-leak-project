@@ -62,6 +62,7 @@ export function verifyLineSignature(
 export async function replyToUser(
   replyToken: string,
   text: string,
+  retryKey?: string,
 ): Promise<void> {
   await postToLine(
     "/message/reply",
@@ -69,6 +70,7 @@ export async function replyToUser(
       replyToken,
       messages: [{ type: "text", text }],
     },
+    retryKey,
   );
 }
 

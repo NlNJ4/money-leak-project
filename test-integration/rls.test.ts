@@ -81,10 +81,15 @@ describe("authenticated users are isolated", () => {
 });
 
 describe("anonymous clients are locked out", () => {
-  it("reads no transactions (RLS, no anon policy)", async () => {
+  it("reads no transactions (RLS denies rows; grant-less stacks deny harder)", async () => {
     const { data, error } = await anonClient().from("transactions").select("id");
-    expect(error).toBeNull();
-    expect(data).toEqual([]);
+    if (error) {
+      // A stack without base grants denies at the privilege level.
+      expect(error.message).toMatch(/permission denied|insufficient/i);
+    } else {
+      // A stack with grants returns nothing: RLS has no anon policy.
+      expect(data).toEqual([]);
+    }
   });
 
   it("cannot touch service-role-only tables (privileges revoked)", async () => {

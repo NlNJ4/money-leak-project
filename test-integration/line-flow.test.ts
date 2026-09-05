@@ -1,5 +1,5 @@
 import "./app-env";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { serviceClient } from "./env";
 import { createTestUser, wipeLocalData } from "./helpers";
@@ -72,6 +72,17 @@ afterAll(async () => {
 beforeEach(() => {
   line.reset();
   gemini.reset();
+});
+
+// FIFO correctness means one leftover live job would block every later
+// test for this user — clear the queue between tests so suites stay
+// independent of each other's failure paths.
+afterEach(async () => {
+  await serviceClient().from("line_jobs").delete().eq("line_user_id", lineUser);
+  await serviceClient()
+    .from("deleted_transaction_staging")
+    .delete()
+    .eq("user_id", userId);
 });
 
 describe("normal flow", () => {
@@ -155,14 +166,16 @@ describe("duplicate and ordered delivery", () => {
 
     await processDueLineJobs();
 
-    // Undo must have removed the 500 entry (not an older one)…
-    const { data: staged } = await serviceClient()
-      .from("deleted_transaction_staging")
-      .select("payload")
-      .limit(1);
-    expect(Number((staged?.[0]?.payload as { amount?: string })?.amount)).toBe(500);
+    // The undo reply names the item it removed: it must be the new 500
+    // entry, not an older transaction (restore then consumes the staging
+    // row, so mid-state is asserted through the reply, not the table).
+    const undoReply = line.requests.find((r) =>
+      JSON.stringify(r.body).includes("ลบรายการล่าสุดแล้ว"),
+    );
+    expect(undoReply).toBeTruthy();
+    expect(JSON.stringify(undoReply?.body)).toContain("500");
 
-    // …and restore must have brought exactly it back.
+    // Restore brought exactly it back and left nothing staged.
     const { count } = await serviceClient()
       .from("transactions")
       .select("id", { count: "exact", head: true })
@@ -236,8 +249,11 @@ describe("Gemini outage behavior", () => {
 
   it("retries a quota-blocked escalation until dead-letter, then apologizes", async () => {
     // "วันจันทร์..." carries an explicit date → escalates to Gemini.
-    gemini.queue({ status: 429, body: { error: { code: 429 } } });
-    gemini.queue({ status: 429, body: { error: { code: 429 } } });
+    // Every attempt exhausts the model chain against 429s: 2 models per
+    // attempt, 5 attempts — queue more than enough.
+    for (let i = 0; i < 12; i++) {
+      gemini.queue({ status: 429, body: { error: { code: 429 } } });
+    }
 
     const evt = event("วันจันทร์กินข้าว 200");
     await enqueueLineJobs([evt]);

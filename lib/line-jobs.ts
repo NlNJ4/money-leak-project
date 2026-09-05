@@ -129,18 +129,17 @@ async function runJob(job: LineJobRow): Promise<void> {
     }
   }
 
-  // One stable retry key per job: LINE deduplicates on it, so a re-sent
-  // push after an ambiguous timeout cannot deliver twice (409 = already
-  // accepted).
+  // One stable retry key per job: LINE deduplicates on it (supported on
+  // both reply and push), so a re-sent delivery after an ambiguous timeout
+  // cannot deliver twice (409 = already accepted).
+  const retryKey = lineRetryKey(job.id);
   try {
     if (job.attempts <= 1 && job.reply_token) {
-      // LINE reply messages do not support X-Line-Retry-Key. Including it
-      // makes the reply endpoint reject the request with HTTP 400.
-      await replyToUser(job.reply_token, reply);
+      await replyToUser(job.reply_token, reply, retryKey);
     } else {
       // Retry-time replies push instead: the reply token is single-use and
       // long expired by now.
-      await pushToUser(job.line_user_id, reply, lineRetryKey(job.id));
+      await pushToUser(job.line_user_id, reply, retryKey);
     }
   } catch (err) {
     console.error("[line-jobs] delivery failed:", job.id, err);
