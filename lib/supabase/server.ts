@@ -56,5 +56,6 @@ export const getAuthContext = cache(async () => {
     supabase,
     userId: claims.sub,
     displayName: fullName ?? email?.split("@")[0] ?? "",
+    email: email ?? "",
   };
 });

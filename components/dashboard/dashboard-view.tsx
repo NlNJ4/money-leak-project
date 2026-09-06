@@ -301,8 +301,101 @@ export function DashboardView({
           onEdit={startEditing}
           onDelete={handleDelete}
         />
+
+        <AccountFooter />
       </main>
     </div>
+  );
+}
+
+function AccountFooter() {
+  const { t } = useI18n();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const deleteAccount = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation }),
+      });
+      if (response.ok) {
+        // The session is destroyed server-side; the login page guard is
+        // satisfied after the router refreshes.
+        router.push("/login");
+        router.refresh();
+        return;
+      }
+      setError(t.dashboard.account.deleteFailed);
+    } catch {
+      setError(t.errors.actionFailed);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <footer className="mt-2 border-t border-zinc-200 pt-4 text-xs text-zinc-400">
+      {!open ? (
+        <div className="flex items-center justify-between">
+          <span>{t.dashboard.account.title}</span>
+          <span className="flex items-center gap-3">
+            <a
+              href="/api/account/export"
+              className="text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline"
+            >
+              {t.dashboard.account.exportData}
+            </a>
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="text-rose-400 underline-offset-2 hover:text-rose-600 hover:underline"
+            >
+              {t.dashboard.account.deleteAccount}
+            </button>
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3">
+          <p className="text-rose-700">{t.dashboard.account.deleteWarning}</p>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={confirmation}
+              onChange={(e) => setConfirmation(e.target.value)}
+              placeholder={t.dashboard.account.deletePlaceholder}
+              className="min-h-9 flex-1 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs"
+            />
+            <button
+              type="button"
+              disabled={deleting || !confirmation.trim()}
+              onClick={deleteAccount}
+              className="min-h-9 rounded-lg bg-rose-600 px-3 py-2 font-medium text-white hover:bg-rose-500 disabled:opacity-60"
+            >
+              {deleting ? "..." : t.dashboard.account.deleteConfirm}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setConfirmation("");
+                setError(null);
+              }}
+              className="min-h-9 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-zinc-500"
+            >
+              {t.dashboard.form.cancel}
+            </button>
+          </div>
+          {error && <p className="text-rose-600">{error}</p>}
+        </div>
+      )}
+    </footer>
   );
 }
 

@@ -68,6 +68,15 @@ const th = {
       set: "ตั้งงบ",
       setHint: "หมวด · จำนวน (บาท/เดือน)",
     },
+    account: {
+      title: "บัญชีของคุณ",
+      exportData: "ดาวน์โหลดข้อมูลทั้งหมด (JSON)",
+      deleteAccount: "ลบบัญชี",
+      deleteWarning: "การลบบัญชีจะลบรายการ งบประมาณ และการเชื่อมต่อ LINE ทั้งหมดอย่างถาวร พิมพ์อีเมลของคุณเพื่อยืนยัน",
+      deletePlaceholder: "พิมพ์อีเมลของคุณ",
+      deleteConfirm: "ลบบัญชีถาวร",
+      deleteFailed: "ลบบัญชีไม่สำเร็จ ตรวจสอบอีเมลที่พิมพ์แล้วลองใหม่",
+    },
     line: {
       connect: "เชื่อมต่อ LINE",
       connected: "เชื่อมต่อ LINE แล้ว",
@@ -172,6 +181,15 @@ const en: Dictionary = {
       title: "Budgets this month",
       set: "Set budget",
       setHint: "Category · amount (per month)",
+    },
+    account: {
+      title: "Your account",
+      exportData: "Download all my data (JSON)",
+      deleteAccount: "Delete account",
+      deleteWarning: "Deleting your account permanently removes all transactions, budgets, and the LINE connection. Type your email to confirm.",
+      deletePlaceholder: "Type your email",
+      deleteConfirm: "Permanently delete",
+      deleteFailed: "Could not delete the account — check the typed email and retry.",
     },
     line: {
       connect: "Connect LINE",
