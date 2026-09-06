@@ -160,17 +160,54 @@ export async function listHistory(
   cursor?: HistoryCursor,
   limit = 20,
 ): Promise<HistoryPageData> {
+  const { data, error } = await queryHistory(filters, cursor, limit);
+  if (error) throw new ServiceError("query_failed", error.message);
+
+  const rows = (data ?? []) as unknown as HistoryRow[];
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
+  return {
+    rows: page,
+    nextCursor:
+      hasMore && last ? { createdAt: last.created_at, id: last.id } : null,
+  };
+}
+
+// Use the identical predicates for export counts and exported rows.
+export async function countHistory(
+  filters: HistoryFilters,
+  cursor?: HistoryCursor,
+): Promise<number> {
+  const { count, error } = await queryHistory(filters, cursor);
+  if (error) throw new ServiceError("query_failed", error.message);
+  if (count === null) throw new ServiceError("query_failed", "Missing history count");
+  return count;
+}
+
+async function queryHistory(
+  filters: HistoryFilters,
+  cursor?: HistoryCursor,
+  limit?: number,
+) {
   const { supabase, userId } = await requireClient();
 
   let query = supabase
     .from("transactions")
-    .select(historySelect)
+    .select(historySelect, {
+      count: limit === undefined ? "exact" : undefined,
+      head: limit === undefined,
+    })
     .eq("user_id", userId)
     .gte("transaction_date", filters.range.from)
-    .lte("transaction_date", filters.range.to)
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(limit + 1);
+    .lte("transaction_date", filters.range.to);
+
+  if (limit !== undefined) {
+    query = query
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(limit + 1);
+  }
 
   if (filters.type) {
     query = query.eq("type", filters.type);
@@ -184,7 +221,7 @@ export async function listHistory(
   if (filters.category) {
     const category = await resolveCategory(supabase, userId, filters.category);
     if (!category) {
-      return { rows: [], nextCursor: null };
+      return { data: [], count: 0, error: null };
     }
     query = query.eq("category_id", category.id);
   }
@@ -194,24 +231,7 @@ export async function listHistory(
     );
   }
 
-  const { data, error } = await query;
-
-  if (error) {
-    throw new ServiceError("query_failed", error.message);
-  }
-
-  const rows = (data ?? []) as unknown as HistoryRow[];
-  const hasMore = rows.length > limit;
-  const page = hasMore ? rows.slice(0, limit) : rows;
-  const last = page[page.length - 1];
-
-  return {
-    rows: page,
-    nextCursor:
-      hasMore && last
-        ? { createdAt: last.created_at, id: last.id }
-        : null,
-  };
+  return await query;
 }
 
 // Effective category set for a user: the shared system catalog plus their

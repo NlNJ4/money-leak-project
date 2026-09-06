@@ -1,17 +1,21 @@
 import "server-only";
 import { z } from "zod";
-import { EXPENSE_CATEGORY_SLUGS } from "@/lib/categories";
-import { monthRange } from "@/lib/date";
+import { categorySlugSchema } from "@/lib/validation";
+import { isValidISODate, monthRange } from "@/lib/date";
 import { getAuthContext } from "@/lib/supabase/server";
 import { ServiceError } from "@/lib/transactions";
 import { enforceMutationRateLimit } from "@/lib/rate-limit";
 
 export const budgetSchema = z.object({
-  category: z.enum(EXPENSE_CATEGORY_SLUGS),
+  category: categorySlugSchema,
   // YYYY-MM or a full ISO date; normalized to the month's first day.
   month: z
     .string()
-    .regex(/^\d{4}-\d{2}(-\d{2})?$/, "invalid month"),
+    .regex(/^\d{4}-\d{2}(-\d{2})?$/, "invalid month")
+    .refine(
+      (value) => isValidISODate(value.length === 7 ? `${value}-01` : value),
+      "invalid month",
+    ),
   amount: z.coerce.number().positive().max(999_999_999),
 });
 
@@ -28,19 +32,19 @@ export type BudgetProgress = {
 };
 
 function monthStart(month: string): string {
-  return month.length === 7 ? `${month}-01` : month;
+  return `${month.slice(0, 7)}-01`;
 }
 
 async function requireAuth() {
   const auth = await getAuthContext();
   if (!auth) throw new ServiceError("unauthorized");
-  enforceMutationRateLimit(auth.userId);
   return auth;
 }
 
 // Upsert: one budget per (user, category, month) — setting again replaces.
 export async function upsertBudget(input: BudgetInput): Promise<void> {
   const { supabase, userId } = await requireAuth();
+  enforceMutationRateLimit(userId);
 
   const { data: category } = await supabase
     .from("categories")
@@ -66,7 +70,8 @@ export async function upsertBudget(input: BudgetInput): Promise<void> {
 }
 
 export async function deleteBudget(id: string): Promise<void> {
-  const { supabase } = await requireAuth();
+  const { supabase, userId } = await requireAuth();
+  enforceMutationRateLimit(userId);
   const { data, error } = await supabase
     .from("budgets")
     .delete()

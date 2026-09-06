@@ -1,12 +1,12 @@
 import "server-only";
 import { z } from "zod";
-import { CATEGORY_SLUGS } from "@/lib/categories";
+import { categorySlugSchema } from "@/lib/validation";
 import { getAuthContext } from "@/lib/supabase/server";
 import { ServiceError } from "@/lib/transactions";
 import { enforceMutationRateLimit } from "@/lib/rate-limit";
 
 export const recurringCreateSchema = z.object({
-  category: z.enum(CATEGORY_SLUGS),
+  category: categorySlugSchema,
   description: z.string().trim().max(200).default(""),
   amount: z.coerce.number().positive().max(999_999_999),
   type: z.enum(["income", "expense"]),
@@ -28,7 +28,6 @@ export type RecurringRule = {
 async function requireAuth() {
   const auth = await getAuthContext();
   if (!auth) throw new ServiceError("unauthorized");
-  enforceMutationRateLimit(auth.userId);
   return auth;
 }
 
@@ -49,6 +48,7 @@ export async function listRecurring(): Promise<RecurringRule[]> {
 
 export async function createRecurring(input: RecurringCreateInput): Promise<void> {
   const { supabase, userId } = await requireAuth();
+  enforceMutationRateLimit(userId);
 
   const { data: category } = await supabase
     .from("categories")
@@ -70,7 +70,8 @@ export async function createRecurring(input: RecurringCreateInput): Promise<void
 }
 
 export async function deactivateRecurring(id: string): Promise<void> {
-  const { supabase } = await requireAuth();
+  const { supabase, userId } = await requireAuth();
+  enforceMutationRateLimit(userId);
   const { data, error } = await supabase
     .from("recurring_rules")
     .update({ active: false })

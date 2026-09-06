@@ -2,11 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { handleServiceError } from "@/app/api/transactions/http";
 import {
   listHistory,
+  countHistory,
   parseHistoryCursor,
 } from "@/lib/transactions";
-import { getAuthContext } from "@/lib/supabase/server";
-import { ServiceError } from "@/lib/transactions";
 import { historyFilterSchema } from "@/lib/validation";
+import { csvCell } from "@/lib/csv-export";
 
 // CSV export, STREAMED: rows are fetched cursor-page by cursor-page and
 // encoded incrementally, so a 50k-row export never buffers the whole
@@ -16,14 +16,6 @@ import { historyFilterSchema } from "@/lib/validation";
 
 const MAX_EXPORT_ROWS = 50_000;
 const PAGE_SIZE = 999;
-
-function csvCell(value: string | number | null | undefined): string {
-  const text = String(value ?? "");
-  if (/[",\n]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-  return text;
-}
 
 export async function GET(request: NextRequest) {
   const params = Object.fromEntries(request.nextUrl.searchParams);
@@ -35,9 +27,12 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const initialCursor = parseHistoryCursor(params.cursor);
+  if (params.cursor && !initialCursor) {
+    return NextResponse.json({ error: "invalid_cursor" }, { status: 400 });
+  }
+
   try {
-    const auth = await getAuthContext();
-    if (!auth) throw new ServiceError("unauthorized");
 
     const filters = {
       range: { from: parsed.data.from, to: parsed.data.to },
@@ -49,13 +44,8 @@ export async function GET(request: NextRequest) {
 
     // Exact count up front so the truncation header is accurate even
     // though headers are sent before the body streams.
-    const { count } = await auth.supabase
-      .from("transactions")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", auth.userId)
-      .gte("transaction_date", filters.range.from)
-      .lte("transaction_date", filters.range.to);
-    const truncated = (count ?? 0) > MAX_EXPORT_ROWS;
+    const count = await countHistory(filters, initialCursor);
+    const truncated = count > MAX_EXPORT_ROWS;
 
     const filename = `transactions-${filters.range.from}_${filters.range.to}.csv`;
     const encoder = new TextEncoder();
@@ -71,7 +61,7 @@ export async function GET(request: NextRequest) {
           );
 
           let emitted = 0;
-          let cursor = parseHistoryCursor(params.cursor);
+          let cursor = initialCursor;
 
           while (emitted < MAX_EXPORT_ROWS) {
             const page = await listHistory(
