@@ -1,7 +1,7 @@
 import "./app-env";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { serviceClient, userClient } from "./env";
+import { serviceClient } from "./env";
 import { categoryId, createTestUser, wipeLocalData } from "./helpers";
 
 // "Operation succeeded, response lost": an import committed twice under the
@@ -10,11 +10,9 @@ import { categoryId, createTestUser, wipeLocalData } from "./helpers";
 // the same.
 
 let user: { userId: string; email: string; password: string };
-let client: Awaited<ReturnType<typeof userClient>>;
 
 beforeAll(async () => {
   user = await createTestUser("import-idem");
-  client = await userClient(user.email, user.password);
 });
 
 afterAll(wipeLocalData);

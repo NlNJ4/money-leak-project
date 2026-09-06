@@ -196,7 +196,7 @@ async function runJob(job: LineJobRow): Promise<void> {
   // accepted", never "deliver again". Trade-off (documented in README):
   // pushes count against LINE's monthly message allowance; replies would
   // be free but un-dedupable.
-  const via: "push" = "push";
+  const via = "push" as const;
   try {
     await pushToUser(job.line_user_id, reply, lineRetryKey(job.id));
   } catch (err) {
