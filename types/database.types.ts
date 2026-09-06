@@ -24,6 +24,8 @@ export type Database = {
           slug: string
           sort_order: number
           type: string
+          user_id: string | null
+          is_custom: boolean
         }
         Insert: {
           created_at?: string
@@ -34,6 +36,8 @@ export type Database = {
           slug: string
           sort_order?: number
           type: string
+          user_id?: string | null
+          is_custom?: boolean
         }
         Update: {
           created_at?: string
@@ -44,8 +48,18 @@ export type Database = {
           slug?: string
           sort_order?: number
           type?: string
+          user_id?: string | null
+          is_custom?: boolean
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "categories_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       linking_codes: {
         Row: {

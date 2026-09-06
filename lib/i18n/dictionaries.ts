@@ -84,6 +84,9 @@ const th = {
       save: "บันทึก",
       saving: "กำลังบันทึก...",
       cancel: "ยกเลิก",
+      addCategory: "สร้างหมวดใหม่",
+      newCategoryName: "ชื่อหมวดใหม่",
+      saveCategory: "สร้าง",
     },
     recent: {
       edit: "แก้ไขรายการนี้",
@@ -179,6 +182,9 @@ const en: Dictionary = {
       save: "Save",
       saving: "Saving...",
       cancel: "Cancel",
+      addCategory: "Create a new category",
+      newCategoryName: "New category name",
+      saveCategory: "Create",
     },
     recent: {
       edit: "Edit this transaction",

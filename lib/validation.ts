@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { isValidISODate } from "@/lib/date";
-import { CATEGORY_SLUGS } from "@/lib/categories";
+
+// Slugs are validated against the caller's effective category set (system
+// 14 + their custom rows) at the service layer; here we only enforce shape.
+export const categorySlugSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(50)
+  .regex(/^[a-z0-9_-]+$/, "invalid slug");
 
 // 'transfer' is postponed per the spec (section 8).
 export const createTransactionSchema = z.object({
@@ -9,7 +17,7 @@ export const createTransactionSchema = z.object({
     .number()
     .positive()
     .max(999_999_999, "amount too large"),
-  category: z.enum(CATEGORY_SLUGS),
+  category: categorySlugSchema,
   description: z.string().trim().max(200).default(""),
   // Real calendar date (YYYY-MM-DD) — rejects 2026-99-99 (audit item 15).
   date: z
@@ -46,8 +54,8 @@ export type TransactionFilterRange = z.infer<typeof transactionFilterSchema>;
 export const historyFilterSchema = transactionFilterSchema.and(
   z.object({
     type: z.enum(["income", "expense"]).optional(),
-    category: z.enum(CATEGORY_SLUGS).optional(),
-    source: z.enum(["web", "line", "receipt"]).optional(),
+    category: categorySlugSchema.optional(),
+    source: z.enum(["web", "line", "receipt", "recurring"]).optional(),
     q: z.string().trim().max(100).optional(),
   }),
 );

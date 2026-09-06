@@ -4,6 +4,7 @@ import {
   CATEGORY_SLUGS,
   EXPENSE_CATEGORY_SLUGS,
   INCOME_CATEGORY_SLUGS,
+  type CategorySlug,
 } from "@/lib/categories";
 import { isValidISODate, toISODate, todayISO as todayISOBangkok } from "@/lib/date";
 import type {
@@ -27,13 +28,20 @@ function requestTimeoutMs(): number {
 }
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export type ParserCategory = {
+  slug: string;
+  type: string;
+  name_th: string;
+};
+
 const responseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("unknown") }),
   z.object({
     kind: z.literal("transaction"),
     type: z.enum(["income", "expense"]),
     amount: z.number().positive(),
-    category: z.enum(CATEGORY_SLUGS),
+    // Membership is validated against the caller's category set below.
+    category: z.string(),
     description: z.string(),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   }),
@@ -44,14 +52,18 @@ const responseSchema = z.discriminatedUnion("kind", [
 const MAX_AMOUNT = 999_999_999;
 
 // Returns a reason string when the parsed transaction violates the app's
-// own validation rules, else null.
-function validateParsed(d: {
-  type: "income" | "expense";
-  amount: number;
-  category: (typeof CATEGORY_SLUGS)[number];
-  description: string;
-  date: string;
-}): string | null {
+// own validation rules, else null. `allowed` maps slug → type for the
+// caller's effective category set.
+function validateParsed(
+  d: {
+    type: "income" | "expense";
+    amount: number;
+    category: string;
+    description: string;
+    date: string;
+  },
+  allowed: ReadonlyMap<string, string>,
+): string | null {
   if (d.amount <= 0 || d.amount > MAX_AMOUNT) {
     return "amount out of range";
   }
@@ -61,19 +73,41 @@ function validateParsed(d: {
   if (d.description.trim().length > 200) {
     return "description too long";
   }
-  const allowed =
-    d.type === "expense" ? EXPENSE_CATEGORY_SLUGS : INCOME_CATEGORY_SLUGS;
-  if (!(allowed as readonly string[]).includes(d.category)) {
+  if (allowed.get(d.category) !== d.type) {
     return "category does not match type";
   }
   return null;
 }
 
-function buildPrompt(text: string): string {
+// The caller's effective categories (system + custom), defaulting to the
+// fixed system catalog.
+function allowedMap(categories?: ParserCategory[]): ReadonlyMap<string, string> {
+  if (!categories || categories.length === 0) {
+    const system = new Map<string, string>();
+    for (const slug of EXPENSE_CATEGORY_SLUGS) system.set(slug, "expense");
+    for (const slug of INCOME_CATEGORY_SLUGS) system.set(slug, "income");
+    return system;
+  }
+  return new Map(categories.map((c) => [c.slug, c.type]));
+}
+
+function buildPrompt(
+  text: string,
+  categories?: ParserCategory[],
+): string {
   // Bangkok wall-clock "today", so relative dates resolve correctly on UTC
   // servers between 00:00 and 07:00 ICT (audit item 9).
   const todayISO = todayISOBangkok();
   const yesterdayISO = toISODate(new Date(Date.now() - 86_400_000));
+
+  const custom = (categories ?? []).filter(
+    (c) => !(EXPENSE_CATEGORY_SLUGS as readonly string[]).includes(c.slug) &&
+      !(INCOME_CATEGORY_SLUGS as readonly string[]).includes(c.slug),
+  );
+  const customSection =
+    custom.length > 0
+      ? `\n  หมวดเพิ่มเติมของผู้ใช้เหล่านี้ (ใช้เมื่อเข้ากับข้อความมากที่สุด):\n${custom.map((c) => `  - ${c.slug}(${c.name_th}) [${c.type}]`).join("\n")}`
+      : "";
 
   return `คุณคือผู้ช่วยบันทึกรายรับรายจ่าย จงแปลงข้อความภาษาไทยหรืออังกฤษเป็นข้อมูลธุรกรรม
 
@@ -84,7 +118,7 @@ function buildPrompt(text: string): string {
 - type: "expense" ถ้าเป็นการใช้เงิน, "income" ถ้าเป็นการได้รับเงิน (ได้เงิน, รับเงิน, ขายของ, เงินเดือน)
 - category ต้องเลือกจากรายการนี้เท่านั้น:
   expense: food(อาหาร,กิน,กาแฟ,ข้าว), transport(น้ำมัน,เติมน้ำมัน,แท็กซี่,รถเมล์,เดินทาง), shopping(ช้อป,ซื้อของ), housing(ค่าเช่า,ผ่อนบ้าน), bills(ค่าน้ำ,ค่าไฟ,เน็ต,โทรศัพท์), health(หมอ,ยา,โรงพยาบาล), entertainment(หนัง,เกม,เที่ยว), family(ให้แม่,ให้พ่อ,ลูก,ครอบครัว), other
-  income: salary(เงินเดือน), freelance(ฟรีแลนซ์,งานนอก), investment(ปันผล,ขายหุ้น,ดอกเบี้ย), refund(เงินคืน,คืนเงิน), other_income(ได้เงิน,รับเงิน)
+  income: salary(เงินเดือน), freelance(ฟรีแลนซ์,งานนอก), investment(ปันผล,ขายหุ้น,ดอกเบี้ย), refund(เงินคืน,คืนเงิน), other_income(ได้เงิน,รับเงิน)${customSection}
 - date: วันที่ทำธุรกรรมเป็น YYYY-MM-DD เทียบจาก "วันนี้" = ${todayISO}
   ("เมื่อวาน" = วันก่อนวันนี้, "มื้อเช้า/วันนี้" ไม่ระบุ = วันนี้) ถ้าไม่แน่ใจให้ใช้ ${todayISO}
 - description: สิ่งที่จ่ายหรือรับ (ตัดจำนวนเงินออก)
@@ -103,7 +137,7 @@ function buildPrompt(text: string): string {
 export class GeminiParser implements TransactionParser {
   async parseTransaction(
     text: string,
-    opts: { liteFirst?: boolean } = {},
+    opts: { liteFirst?: boolean; categories?: ParserCategory[] } = {},
   ): Promise<ParsedTransaction | null> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -121,10 +155,19 @@ export class GeminiParser implements TransactionParser {
       ? [...new Set([DEFAULT_FALLBACK_MODEL, ...chain])]
       : [...new Set(chain)];
 
+    const allowed = allowedMap(opts.categories);
+    const enumSlugs = opts.categories?.length
+      ? opts.categories.map((c) => c.slug)
+      : [...CATEGORY_SLUGS];
+
     let lastError: unknown;
     for (const model of models) {
       try {
-        const result = await this.attemptModel(model, text);
+        const result = await this.attemptModel(model, text, {
+          allowed,
+          enumSlugs,
+          categories: opts.categories,
+        });
         if (model !== primary) {
           console.warn(`[gemini] primary ${primary} unavailable, used fallback ${model}`);
         }
@@ -139,6 +182,11 @@ export class GeminiParser implements TransactionParser {
   private async attemptModel(
     model: string,
     text: string,
+    ctx: {
+      allowed: ReadonlyMap<string, string>;
+      enumSlugs: string[];
+      categories?: ParserCategory[];
+    },
   ): Promise<ParsedTransaction | null> {
     const apiKey = process.env.GEMINI_API_KEY!;
     // Bound each model so a congested endpoint cannot consume LINE's entire
@@ -159,7 +207,7 @@ export class GeminiParser implements TransactionParser {
           },
           signal: AbortSignal.timeout(requestTimeoutMs()),
           body: JSON.stringify({
-            contents: [{ parts: [{ text: buildPrompt(text) }] }],
+            contents: [{ parts: [{ text: buildPrompt(text, ctx.categories) }] }],
             generationConfig: {
               // Gemini 3.x removed temperature/top_p/top_k; sending them may
               // fail the request (audit item 7).
@@ -171,7 +219,7 @@ export class GeminiParser implements TransactionParser {
                   kind: { type: "string", enum: ["transaction", "unknown"] },
                   type: { type: "string", enum: ["income", "expense"] },
                   amount: { type: "number" },
-                  category: { type: "string", enum: [...CATEGORY_SLUGS] },
+                  category: { type: "string", enum: ctx.enumSlugs },
                   description: { type: "string" },
                   date: { type: "string" },
                 },
@@ -221,7 +269,7 @@ export class GeminiParser implements TransactionParser {
     // Invalid values are a provider failure, not a user message: throw so
     // parseTransaction tries the next model instead of enqueueing a
     // transaction the database will reject.
-    const violation = validateParsed(d);
+    const violation = validateParsed(d, ctx.allowed);
     if (violation) {
       throw new Error(`Gemini output rejected (${violation}): ${JSON.stringify(d).slice(0, 200)}`);
     }
@@ -229,7 +277,8 @@ export class GeminiParser implements TransactionParser {
     return {
       type: d.type,
       amount: d.amount,
-      category: d.category,
+      // validateParsed already proved membership in the caller's set.
+      category: d.category as CategorySlug,
       description: d.description.trim().slice(0, 200) || d.category,
       date: d.date,
     };

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useI18n } from "@/lib/i18n/provider";
 import { todayISO } from "@/lib/date";
@@ -28,6 +29,7 @@ export function AddTransactionForm({
   onCancel?: () => void;
 }) {
   const { t, locale } = useI18n();
+  const router = useRouter();
   const [type, setType] = useState<"expense" | "income">(
     initial?.type ?? "expense",
   );
@@ -40,7 +42,14 @@ export function AddTransactionForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const options = categories.filter((c) => c.type === type);
+  // Inline custom-category creation.
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryIcon, setNewCategoryIcon] = useState("🏷️");
+  const [localCategories, setLocalCategories] = useState<Category[]>([]);
+  const allCategories = [...categories, ...localCategories];
+
+  const options = allCategories.filter((c) => c.type === type);
 
   const switchType = (next: "expense" | "income") => {
     setType(next);
@@ -163,21 +172,99 @@ export function AddTransactionForm({
         </label>
         <label className="flex flex-col gap-1 text-xs text-zinc-500">
           {t.dashboard.form.category}
-          <select
-            required
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className={inputClass}
-          >
-            <option value="" disabled>
-              —
-            </option>
-            {options.map((c) => (
-              <option key={c.slug} value={c.slug}>
-                {c.icon} {c[label]}
+          <div className="flex items-center gap-1.5">
+            <select
+              required
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className={inputClass}
+            >
+              <option value="" disabled>
+                —
               </option>
-            ))}
-          </select>
+              {options.map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.icon} {c[label]}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              aria-label={t.dashboard.form.addCategory}
+              onClick={() => setAddingCategory((v) => !v)}
+              className="min-h-9 min-w-9 shrink-0 rounded-lg border border-zinc-200 text-base text-zinc-500 hover:bg-zinc-50"
+            >
+              +
+            </button>
+          </div>
+          {addingCategory && (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                maxLength={8}
+                value={newCategoryIcon}
+                onChange={(e) => setNewCategoryIcon(e.target.value)}
+                aria-label="icon"
+                className="w-14 rounded-lg border border-zinc-200 bg-white px-2 py-2 text-center text-sm"
+              />
+              <input
+                type="text"
+                maxLength={50}
+                required
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder={t.dashboard.form.newCategoryName}
+                className={inputClass}
+              />
+              <button
+                type="button"
+                disabled={!newCategoryName.trim()}
+                onClick={async () => {
+                  const name = newCategoryName.trim();
+                  const slug = name
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, "-")
+                    .replace(/^-+|-+$/g, "")
+                    .slice(0, 40) || `cat-${Date.now()}`;
+                  try {
+                    const response = await fetch("/api/categories", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        slug,
+                        name_th: name,
+                        name_en: name,
+                        icon: newCategoryIcon.trim() || "🏷️",
+                        type,
+                      }),
+                    });
+                    if (!response.ok) {
+                      setError(t.dashboard.errors.generic);
+                      return;
+                    }
+                    const created: Category = {
+                      id: `local-${slug}`,
+                      slug,
+                      name_th: name,
+                      name_en: name,
+                      icon: newCategoryIcon.trim() || "🏷️",
+                      type,
+                    };
+                    setLocalCategories((prev) => [...prev, created]);
+                    setCategory(slug);
+                    setAddingCategory(false);
+                    setNewCategoryName("");
+                    router.refresh();
+                  } catch {
+                    setError(t.dashboard.errors.generic);
+                  }
+                }}
+                className="shrink-0 rounded-lg bg-zinc-900 px-3 py-2 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-60"
+              >
+                {t.dashboard.form.saveCategory}
+              </button>
+            </div>
+          )}
         </label>
         <label className="flex flex-col gap-1 text-xs text-zinc-500">
           {t.dashboard.form.description}

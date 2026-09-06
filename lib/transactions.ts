@@ -1,7 +1,5 @@
 import "server-only";
-import { unstable_cache } from "next/cache";
 import { isValidISODate, todayISO } from "@/lib/date";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient, getAuthContext } from "@/lib/supabase/server";
 import type {
   CreateTransactionInput,
@@ -173,11 +171,7 @@ export async function listHistory(
     query = query.ilike("description", `%${escapeIlike(filters.q)}%`);
   }
   if (filters.category) {
-    const { data: category } = await supabase
-      .from("categories")
-      .select("id")
-      .eq("slug", filters.category)
-      .maybeSingle();
+    const category = await resolveCategory(supabase, userId, filters.category);
     if (!category) {
       return { rows: [], nextCursor: null };
     }
@@ -209,34 +203,48 @@ export async function listHistory(
   };
 }
 
-const getCachedCategories = unstable_cache(
-  async (): Promise<Category[]> => {
-    // Categories are shared, read-only reference data. The server-only client
-    // lets this cache stay independent of request cookies without exposing the
-    // service key or bypassing RLS for any user-owned data.
-    const supabase = createAdminClient();
-
-    const { data, error } = await supabase
-      .from("categories")
-      .select("id, slug, name_th, name_en, icon, type")
-      .order("type")
-      .order("sort_order");
-
-    if (error) {
-      throw new ServiceError("query_failed", error.message);
-    }
-
-    return (data ?? []) as Category[];
-  },
-  ["dashboard-categories"],
-  { revalidate: 3600, tags: ["categories"] },
-);
-
+// Effective category set for a user: the shared system catalog plus their
+// own custom rows. Per-request by design — the old shared unstable_cache
+// would leak one user's custom categories into another's requests.
 export async function listCategories(): Promise<Category[]> {
-  return getCachedCategories();
+  const auth = await getAuthContext();
+  if (!auth) {
+    throw new ServiceError("unauthorized");
+  }
+
+  const { data, error } = await auth.supabase
+    .from("categories")
+    .select("id, slug, name_th, name_en, icon, type")
+    .order("type")
+    .order("sort_order");
+
+  if (error) {
+    throw new ServiceError("query_failed", error.message);
+  }
+
+  return (data ?? []) as Category[];
 }
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
+// Resolve a slug against the caller's effective set: their custom rows
+// first, then the shared system catalog. (userId comes from the verified
+// auth context, so it is always a plain uuid — safe in the or() filter.)
+async function resolveCategory(
+  supabase: ServerClient,
+  userId: string,
+  slug: string,
+): Promise<{ id: string; type: string } | null> {
+  const { data } = await supabase
+    .from("categories")
+    .select("id, type")
+    .eq("slug", slug)
+    .or(`user_id.is.null,user_id.eq.${userId}`)
+    .order("user_id", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { id: string; type: string } | null) ?? null;
+}
 
 async function queryTransactions(
   supabase: ServerClient,
@@ -309,11 +317,7 @@ export async function getDashboardData(
 export async function createTransaction(input: CreateTransactionInput) {
   const { supabase, userId } = await requireClient();
 
-  const { data: category } = await supabase
-    .from("categories")
-    .select("id, type")
-    .eq("slug", input.category)
-    .single();
+  const category = await resolveCategory(supabase, userId, input.category);
 
   if (!category) {
     throw new ServiceError("category_not_found");
@@ -347,7 +351,7 @@ export async function updateTransaction(
   id: string,
   input: UpdateTransactionInput,
 ): Promise<TransactionRow> {
-  const { supabase } = await requireClient();
+  const { supabase, userId } = await requireClient();
 
   // Fetch the current row first: RLS scopes it to the caller, and merging
   // lets us validate type/category consistency against the final state.
@@ -385,11 +389,7 @@ export async function updateTransaction(
       throw new ServiceError("category_not_found");
     }
 
-    const { data: category } = await supabase
-      .from("categories")
-      .select("id, type")
-      .eq("slug", slug)
-      .single();
+    const category = await resolveCategory(supabase, userId, slug);
 
     if (!category) {
       throw new ServiceError("category_not_found");

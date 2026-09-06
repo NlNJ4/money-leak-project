@@ -488,6 +488,18 @@ async function updateLatestAmount(
 
 // ---- AI save flow ----
 
+// The user's effective category set (system + custom) for the parser.
+async function effectiveCategories(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+) {
+  const { data } = await admin
+    .from("categories")
+    .select("slug, type, name_th")
+    .or(`user_id.is.null,user_id.eq.${userId}`);
+  return (data ?? []) as { slug: string; type: string; name_th: string }[];
+}
+
 async function saveTransaction(
   userId: string,
   parsed: ParsedTransaction,
@@ -624,7 +636,8 @@ export async function handleLineMessage(
   // Provider/network failures propagate so the queue retries the job.
   // Statuses: rule/gemini → save; unknown → help; quota/circuit → offer
   // the mid-confidence local guess for confirmation instead of guessing.
-  const status = await parseTransactionWithStatus(trimmed);
+  const categories = await effectiveCategories(admin, userId);
+  const status = await parseTransactionWithStatus(trimmed, categories);
 
   if (status.via === "quota" || status.via === "circuit") {
     if (status.ruleParsed) {

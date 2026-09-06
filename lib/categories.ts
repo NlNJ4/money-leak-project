@@ -1,5 +1,7 @@
-// Fixed category slugs from the product spec (section 7). The AI parser and
-// the web form may only assign these; display names/icons live in the DB.
+// Fixed category slugs from the product spec (section 7) — the SYSTEM
+// catalog. Users may add custom categories (migration 21); system slugs
+// remain the keyword-matching vocabulary for the local parser and the
+// fallback "other"/"other_income".
 export const EXPENSE_CATEGORY_SLUGS = [
   "food",
   "transport",
@@ -24,3 +26,7 @@ export const CATEGORY_SLUGS = [...EXPENSE_CATEGORY_SLUGS, ...INCOME_CATEGORY_SLU
 
 export type CategorySlug = (typeof CATEGORY_SLUGS)[number];
 export type TransactionType = "income" | "expense";
+
+export function isSystemSlug(slug: string): boolean {
+  return (CATEGORY_SLUGS as readonly string[]).includes(slug);
+}

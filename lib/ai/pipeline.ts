@@ -1,4 +1,4 @@
-import { GeminiParser } from "@/lib/ai/gemini";
+import { GeminiParser, type ParserCategory } from "@/lib/ai/gemini";
 import { parseWithConfidence } from "@/lib/ai/rule-parser";
 import type { ParsedTransaction } from "@/lib/ai/provider";
 import { recordMetrics } from "@/lib/observability";
@@ -51,6 +51,7 @@ async function noteAiOutcome(quotaErr: boolean): Promise<void> {
 
 export async function parseTransactionWithStatus(
   text: string,
+  categories?: ParserCategory[],
 ): Promise<ParseStatus> {
   const startedAt = Date.now();
   const rule = parseWithConfidence(text);
@@ -86,7 +87,10 @@ export async function parseTransactionWithStatus(
   const liteFirst = rule.parsed !== null;
 
   try {
-    const result = await new GeminiParser().parseTransaction(text, { liteFirst });
+    const result = await new GeminiParser().parseTransaction(text, {
+      liteFirst,
+      categories,
+    });
     logParserEvent({
       source: "gemini",
       outcome: result ? "parsed" : "unknown",

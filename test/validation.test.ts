@@ -31,9 +31,18 @@ describe("createTransactionSchema", () => {
     expect(createTransactionSchema.safeParse({ ...valid, amount: 1_000_000_000 }).success).toBe(false);
   });
 
-  it("rejects categories outside the fixed enum (spec section 7)", () => {
+  it("validates category slug shape; membership is the service layer's job", () => {
+    // With custom categories, membership in the user's set is checked
+    // against the database at the service layer — the schema only enforces
+    // slug shape.
     expect(
       createTransactionSchema.safeParse({ ...valid, category: "dining" }).success,
+    ).toBe(true);
+    expect(
+      createTransactionSchema.safeParse({ ...valid, category: "Food Truck" }).success,
+    ).toBe(false);
+    expect(
+      createTransactionSchema.safeParse({ ...valid, category: "food;drop" }).success,
     ).toBe(false);
   });
 
@@ -78,7 +87,7 @@ describe("updateTransactionSchema", () => {
 
   it("still validates provided fields against the same rules", () => {
     expect(updateTransactionSchema.safeParse({ amount: -1 }).success).toBe(false);
-    expect(updateTransactionSchema.safeParse({ category: "dining" }).success).toBe(false);
+    expect(updateTransactionSchema.safeParse({ category: "bad slug!" }).success).toBe(false);
     expect(updateTransactionSchema.safeParse({ type: "transfer" }).success).toBe(false);
     expect(
       updateTransactionSchema.safeParse({ date: "2026-99-99" }).success,
