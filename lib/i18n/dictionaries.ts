@@ -56,6 +56,11 @@ const th = {
       daily: "รายวัน",
       noData: "ยังไม่มีข้อมูลในช่วงนี้",
     },
+    budgets: {
+      title: "งบประมาณเดือนนี้",
+      set: "ตั้งงบ",
+      setHint: "หมวด · จำนวน (บาท/เดือน)",
+    },
     line: {
       connect: "เชื่อมต่อ LINE",
       connected: "เชื่อมต่อ LINE แล้ว",
@@ -145,6 +150,11 @@ const en: Dictionary = {
     charts: {
       daily: "Daily",
       noData: "No data for this period",
+    },
+    budgets: {
+      title: "Budgets this month",
+      set: "Set budget",
+      setHint: "Category · amount (per month)",
     },
     line: {
       connect: "Connect LINE",

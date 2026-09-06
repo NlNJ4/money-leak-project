@@ -22,6 +22,10 @@ const RESTORE_RE = /^กู้คืน(ล่าสุด)?$/;
 // "แก้ล่าสุด 80" / "แก้ 80" / "แก้ 80 บาท" — fix the latest amount.
 const EDIT_LATEST_RE = /^แก้(?:ล่าสุด|รายการล่าสุด)?\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?$/;
 
+// "เดือนนี้ตั้งงบอาหาร 6000" / "ตั้งงบ อาหาร 6000 บาท" — set a monthly budget.
+const SET_BUDGET_RE =
+  /^(?:เดือนนี้\s*)?ตั้งงบ\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?$/;
+
 // Brute-force guard for code redemption: 5 attempts per LINE user per hour,
 // counted atomically in the database (register_redeem_attempt RPC) so it
 // holds across serverless instances.
@@ -55,6 +59,7 @@ const HELP_TEXT = [
   "พิมพ์ผิด? พิมพ์ ลบล่าสุด เพื่อลบรายการล่าสุด",
   "แล้วพิมพ์ กู้คืน ภายใน 2 นาที เพื่อเอากลับ",
   "แก้จำนวนเงิน: แก้ล่าสุด 80",
+  "ตั้งงบรายจ่าย: ตั้งงบ อาหาร 6000",
 ].join("\n");
 
 const NOT_LINKED_TEXT = [
@@ -222,6 +227,80 @@ async function recentText(userId: string): Promise<string> {
   });
 
   return ["🕘 ล่าสุด", "", ...lines].join("\n");
+}
+
+// ---- budgets (เดือนนี้ตั้งงบอาหาร 6000) ----
+
+// Maps a Thai/English category name to a slug. Accepts both the Thai and
+// English display names of the fixed catalog.
+async function resolveCategoryName(
+  admin: ReturnType<typeof createAdminClient>,
+  name: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from("categories")
+    .select("slug")
+    .or(`name_th.eq.${name},name_en.ilike.${name},slug.eq.${name}`)
+    .limit(1)
+    .maybeSingle();
+  return data?.slug ?? null;
+}
+
+async function setBudget(
+  userId: string,
+  categoryName: string,
+  amount: number,
+): Promise<string> {
+  const admin = createAdminClient();
+
+  if (!(amount > 0) || amount > 999_999_999) {
+    return "จำนวนเงินไม่ถูกต้องครับ ลองแบบนี้: ตั้งงบ อาหาร 6000";
+  }
+
+  const slug = await resolveCategoryName(admin, categoryName);
+  if (!slug) {
+    return `ไม่รู้จักหมวด "${categoryName}" ครับ เช่น อาหาร, เดินทาง, ค่าไฟ`;
+  }
+
+  const { data: category } = await admin
+    .from("categories")
+    .select("id, type, icon, name_th")
+    .eq("slug", slug)
+    .single();
+
+  if (!category || category.type !== "expense") {
+    return "ตั้งงบได้เฉพาะหมวดรายจ่ายครับ";
+  }
+
+  const range = monthRange();
+  const { error } = await admin
+    .from("budgets")
+    .upsert(
+      {
+        user_id: userId,
+        category_id: category.id,
+        month: `${range.from.slice(0, 7)}-01`,
+        amount,
+      },
+      { onConflict: "user_id,category_id,month" },
+    );
+
+  if (error) {
+    throw new Error(`budget upsert failed: ${error.message}`);
+  }
+
+  // Immediate feedback: month-to-date spend vs the new budget.
+  const summary = await rangeSummary(admin, userId, range);
+  const spent = summary.categories
+    .filter((c) => c.type === "expense" && c.name === category.name_th)
+    .reduce((sum, c) => sum + Number(c.total), 0);
+  const pct = amount > 0 ? Math.round((spent / amount) * 100) : 0;
+
+  return [
+    `🎯 ตั้งงบ "${category.icon ?? ""} ${category.name_th}" เดือนนี้ = ${fmt(amount)} บาท`,
+    "",
+    `ใช้ไปแล้ว ${fmt(spent)} บาท (${pct}% ของงบ)`,
+  ].join("\n");
 }
 
 // ---- undo (delete latest transaction) ----
@@ -455,6 +534,10 @@ export async function handleLineMessage(
   }
   if (collapsed === "ใช่" || collapsed === "ไม่ใช่") {
     return resolvePendingConfirm(userId, commandKey, collapsed === "ใช่");
+  }
+  const budgetMatch = collapsed.match(SET_BUDGET_RE);
+  if (budgetMatch) {
+    return setBudget(userId, budgetMatch[1].trim(), Number(budgetMatch[2].replace(/,/g, "")));
   }
   if (trimmed === "ช่วย" || trimmed.toLowerCase() === "help") {
     return HELP_TEXT;

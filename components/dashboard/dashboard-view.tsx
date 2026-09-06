@@ -17,7 +17,9 @@ import {
 } from "@/components/dashboard/add-transaction-form";
 import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { DailyChart } from "@/components/dashboard/daily-chart";
+import { BudgetCard } from "@/components/dashboard/budget-card";
 import { ConnectLine } from "@/components/dashboard/connect-line";
+import type { BudgetProgress } from "@/lib/budgets";
 
 type Period = "today" | "week" | "month" | "custom";
 
@@ -48,6 +50,7 @@ export function DashboardView({
   range,
   displayName,
   lineConnected,
+  budgets,
 }: {
   data: DashboardData;
   categories: Category[];
@@ -55,6 +58,7 @@ export function DashboardView({
   range: { from: string; to: string };
   displayName: string;
   lineConnected: boolean;
+  budgets: BudgetProgress[];
 }) {
   const { t, locale } = useI18n();
   const router = useRouter();
@@ -256,6 +260,8 @@ export function DashboardView({
           })}
           {period === "custom" && <CustomRange from={range.from} to={range.to} />}
         </section>
+
+        {budgets.length > 0 && <BudgetCard items={budgets} />}
 
         <CategoryDonut items={data.byCategory} total={data.totals.expense} />
 
