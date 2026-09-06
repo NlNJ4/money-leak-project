@@ -63,6 +63,16 @@ export function HistoryView({
   const [exporting, setExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
+  // CSV import flow: pick file → server-side preview → explicit commit.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importPending, setImportPending] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<{
+    validCount: number;
+    totalRows: number;
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importDone, setImportDone] = useState<number | null>(null);
+
   // In-flight load-more requests are aborted when filters change or a new
   // page load starts, so stale responses can never land in the list.
   const loadAbort = useRef<AbortController | null>(null);
@@ -219,6 +229,13 @@ export function HistoryView({
           <div className="flex flex-col items-end gap-1">
             <button
               type="button"
+              onClick={() => setImportOpen((v) => !v)}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
+            >
+              ⬆ {t.history.import}
+            </button>
+            <button
+              type="button"
               onClick={exportCsv}
               disabled={exporting}
               className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-60"
@@ -232,6 +249,80 @@ export function HistoryView({
             )}
           </div>
         </div>
+
+        {importOpen && (
+          <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-4">
+            <h2 className="text-sm font-medium">{t.history.importTitle}</h2>
+            <p className="text-xs text-zinc-500">{t.history.importHint}</p>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const text = await file.text();
+                setImportPending(text);
+                const response = await fetch(
+                  "/api/transactions/import?mode=preview",
+                  { method: "POST", body: text },
+                ).catch(() => null);
+                if (response?.ok) {
+                  const payload = (await response.json()) as {
+                    validCount: number;
+                    totalRows: number;
+                  };
+                  setImportSummary(payload);
+                }
+              }}
+              className="text-xs"
+            />
+            {importSummary && (
+              <p className="text-xs">
+                <span className="font-medium text-emerald-600">
+                  {importSummary.validCount}
+                </span>{" "}
+                / {importSummary.totalRows} {t.history.importValid}
+              </p>
+            )}
+            {importPending && (
+              <button
+                type="button"
+                onClick={async () => {
+                  setImporting(true);
+                  try {
+                    const response = await fetch(
+                      "/api/transactions/import?mode=commit",
+                      { method: "POST", body: importPending },
+                    );
+                    if (response.ok) {
+                      const payload = (await response.json()) as {
+                        inserted: number;
+                      };
+                      setImportSummary(null);
+                      setImportPending(null);
+                      setImportOpen(false);
+                      setImportDone(payload.inserted);
+                      router.refresh();
+                    }
+                  } finally {
+                    setImporting(false);
+                  }
+                }}
+                disabled={importing || !importSummary || importSummary.validCount === 0}
+                className="min-h-9 self-start rounded-lg bg-zinc-900 px-4 py-2 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-60"
+              >
+                {importing
+                  ? "..."
+                  : `${t.history.importCommit} (${importSummary?.validCount ?? 0})`}
+              </button>
+            )}
+            {importDone !== null && (
+              <p className="text-xs text-emerald-600">
+                ✅ {t.history.importDone} {importDone}
+              </p>
+            )}
+          </div>
+        )}
 
         <form
           onSubmit={applyFilters}
