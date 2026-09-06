@@ -7,6 +7,7 @@ import {
 import { listCategories, ServiceError } from "@/lib/transactions";
 import { getAuthContext } from "@/lib/supabase/server";
 import { enforceMutationRateLimit } from "@/lib/rate-limit";
+import { idParamSchema } from "@/lib/validation";
 
 // CSV import: POST with mode=preview (validate only) or mode=commit
 // (insert the valid rows). The body is raw CSV text in the same format
@@ -44,25 +45,49 @@ export async function POST(request: NextRequest) {
           const categoryId = idBySlug.get(row.category);
           if (!categoryId) return null;
           return {
-            user_id: auth.userId,
             type: row.type,
             amount: row.amount,
             category_id: categoryId,
             description: row.description,
-            transaction_date: row.date,
-            source: "web",
+            date: row.date,
           };
         })
         .filter((v): v is NonNullable<typeof v> => v !== null);
 
-      // ONE insert statement = one database transaction: a failure leaves
-      // nothing saved, so a client retry can never duplicate rows. The
-      // 1,000-row import cap keeps this single statement small enough.
-      const { error } = await auth.supabase
-        .from("transactions")
-        .insert(values);
+      // The client's persistent import ID makes commit retries idempotent:
+      // the marker insert + all row inserts are ONE transaction, so a lost
+      // response followed by a same-ID retry returns already_imported
+      // instead of duplicating rows. A failure rolls everything back.
+      const importId = request.headers.get("x-import-id");
+      if (!importId || !idParamSchema.safeParse(importId).success) {
+        return NextResponse.json(
+          { error: "import_id_required" },
+          { status: 400 },
+        );
+      }
+
+      const { data: result, error } = await auth.supabase.rpc(
+        "import_transactions",
+        {
+          p_import_id: importId,
+          p_user_id: auth.userId,
+          p_rows: values,
+        },
+      );
       if (error) throw new ServiceError("insert_failed", error.message);
-      inserted = values.length;
+
+      const outcome = result as { status: string; inserted?: number };
+      if (outcome.status === "already_imported") {
+        return NextResponse.json({
+          mode,
+          totalRows: results.length,
+          validCount,
+          inserted: 0,
+          alreadyImported: true,
+          results,
+        });
+      }
+      inserted = outcome.inserted ?? 0;
     }
 
     return NextResponse.json({

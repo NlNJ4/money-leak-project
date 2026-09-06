@@ -64,8 +64,11 @@ export function HistoryView({
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   // CSV import flow: pick file → server-side preview → explicit commit.
+  // The import ID is generated once per pending file and reused across
+  // commit retries, so a lost response cannot cause a double import.
   const [importOpen, setImportOpen] = useState(false);
   const [importPending, setImportPending] = useState<string | null>(null);
+  const [importId, setImportId] = useState<string | null>(null);
   const [importSummary, setImportSummary] = useState<{
     validCount: number;
     totalRows: number;
@@ -262,6 +265,7 @@ export function HistoryView({
                 if (!file) return;
                 const text = await file.text();
                 setImportPending(text);
+                setImportId(crypto.randomUUID());
                 const response = await fetch(
                   "/api/transactions/import?mode=preview",
                   { method: "POST", body: text },
@@ -292,16 +296,24 @@ export function HistoryView({
                   try {
                     const response = await fetch(
                       "/api/transactions/import?mode=commit",
-                      { method: "POST", body: importPending },
+                      {
+                        method: "POST",
+                        headers: { "x-import-id": importId ?? "" },
+                        body: importPending,
+                      },
                     );
                     if (response.ok) {
                       const payload = (await response.json()) as {
                         inserted: number;
+                        alreadyImported?: boolean;
                       };
                       setImportSummary(null);
                       setImportPending(null);
+                      setImportId(null);
                       setImportOpen(false);
-                      setImportDone(payload.inserted);
+                      setImportDone(
+                        payload.alreadyImported ? 0 : payload.inserted,
+                      );
                       router.refresh();
                     }
                   } finally {

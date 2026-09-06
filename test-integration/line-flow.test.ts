@@ -106,12 +106,12 @@ describe("normal flow", () => {
     const slug = Array.isArray(category) ? category[0]?.slug : category?.slug;
     expect(slug).toBe("food");
 
-    const reply = line.requests.find((r) => r.path === "/message/reply");
-    expect(reply).toBeTruthy();
-    // The reply endpoint REJECTS X-Line-Retry-Key (unsupported there), so
-    // first attempts must be sent keyless.
-    expect(reply?.headers["x-line-retry-key"]).toBeUndefined();
-    expect(JSON.stringify(reply?.body)).toContain("บันทึกแล้ว");
+    // Delivery is push-only with a stable retry key: the reply endpoint
+    // cannot carry the key, and only keyed requests are dedup-safe.
+    const push = line.requests.find((r) => r.path === "/message/push");
+    expect(push).toBeTruthy();
+    expect(push?.headers["x-line-retry-key"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.stringify(push?.body)).toContain("บันทึกแล้ว");
 
     expect(gemini.requests.length).toBe(0);
   });
@@ -191,8 +191,8 @@ describe("duplicate and ordered delivery", () => {
 });
 
 describe("delivery failure paths", () => {
-  it("retries a rejected reply token via push with the retry key", async () => {
-    line.queue({ status: 400, body: { message: "Invalid reply token" } });
+  it("retries a failed push with the SAME retry key", async () => {
+    line.queue({ status: 400, body: { message: "bad request" } });
     const evt = event("ล่าสุด");
     await enqueueLineJobs([evt]);
     await processDueLineJobs();
@@ -205,25 +205,22 @@ describe("delivery failure paths", () => {
     await forceDue(evt.eventKey);
     await processDueLineJobs();
 
-    const pushed = line.requests.find((r) => r.path === "/message/push");
-    expect(pushed?.headers["x-line-retry-key"]).toMatch(/^[0-9a-f-]{36}$/);
+    // Both attempts pushed under the SAME key: LINE deduplicates on it,
+    // so an earlier accepted-but-unacknowledged push cannot deliver twice.
+    const pushes = line.requests.filter((r) => r.path === "/message/push");
+    expect(pushes).toHaveLength(2);
+    const keys = pushes.map((r) => r.headers["x-line-retry-key"]);
+    expect(new Set(keys).size).toBe(1);
 
     const done = await jobRow(evt.eventKey);
     expect(done?.status).toBe("completed");
   });
 
   it("treats 409 on a keyed push as delivered", async () => {
-    // First attempt: the reply endpoint times out (no retry key there).
-    line.queue({ hang: true });
+    // 409 = the original push was accepted; treat as success, not failure.
+    line.queue({ status: 409, body: { message: "already processed" } });
     const evt = event("วันนี้");
     await enqueueLineJobs([evt]);
-    await processDueLineJobs();
-    const failed = await jobRow(evt.eventKey);
-    expect(failed?.status).toBe("retry");
-
-    // Retry goes out as a keyed push; 409 = LINE already accepted it.
-    await forceDue(evt.eventKey);
-    line.queue({ status: 409, body: { message: "already processed" } });
     await processDueLineJobs();
 
     const done = await jobRow(evt.eventKey);

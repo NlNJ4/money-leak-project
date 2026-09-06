@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleLineMessage } from "@/lib/line-bot";
-import { lineRetryKey, pushToUser, replyToUser } from "@/lib/line";
+import { lineRetryKey, pushToUser } from "@/lib/line";
 import {
   logJobEvent,
   pushOwnerAlertOnce,
@@ -30,7 +30,7 @@ const SWEEP_BUDGET_MS = 40_000;
 type LineJobRow = {
   id: string;
   line_user_id: string;
-  reply_token: string | null;
+  reply_token: string | null; // always null: delivery is push-only
   text: string | null;
   attempts: number;
   reply_text: string | null;
@@ -39,7 +39,6 @@ type LineJobRow = {
 export type EnqueueableEvent = {
   eventKey: string;
   lineUserId: string;
-  replyToken: string;
   text: string;
   // LINE event timestamp (epoch ms) + position in the webhook batch: the
   // claim RPC orders strictly by these per user, so "ลบล่าสุด" can never
@@ -62,7 +61,9 @@ export async function enqueueLineJobs(
     events.map((event) => ({
       id: event.eventKey,
       line_user_id: event.lineUserId,
-      reply_token: event.replyToken,
+      // Reply tokens are not stored: delivery is push-only (keyed), and
+      // tokens are single-use secrets that would otherwise sit in the queue.
+      reply_token: null,
       text: event.text,
       line_timestamp: event.lineTimestamp,
       batch_seq: event.batchSeq,
@@ -187,21 +188,17 @@ async function runJob(job: LineJobRow): Promise<void> {
     });
   }
 
-  // Push delivery carries a stable retry key (LINE deduplicates on it, so a
-  // re-sent push after an ambiguous timeout cannot deliver twice; 409 =
-  // already accepted). The REPLY endpoint does not support the header and
-  // rejects it with 400, so first attempts stay keyless — a reply lost to
-  // a timeout falls back to a keyed push on the next attempt.
-  const via: "reply" | "push" =
-    job.attempts <= 1 && job.reply_token ? "reply" : "push";
+  // Delivery is ALWAYS a keyed push. Reply tokens cannot carry the retry
+  // key, so a reply accepted by LINE just before a timeout could be
+  // delivered a second time by the retry push — the retry key only
+  // deduplicates against other keyed requests. Pushing exclusively makes
+  // the whole delivery history of a job dedup-safe: 409 means "already
+  // accepted", never "deliver again". Trade-off (documented in README):
+  // pushes count against LINE's monthly message allowance; replies would
+  // be free but un-dedupable.
+  const via: "push" = "push";
   try {
-    if (via === "reply") {
-      await replyToUser(job.reply_token!, reply);
-    } else {
-      // Retry-time replies push instead: the reply token is single-use and
-      // long expired by now.
-      await pushToUser(job.line_user_id, reply, lineRetryKey(job.id));
-    }
+    await pushToUser(job.line_user_id, reply, lineRetryKey(job.id));
   } catch (err) {
     console.error("[line-jobs] delivery failed:", job.id, err);
     logJobEvent({

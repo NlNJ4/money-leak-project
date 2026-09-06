@@ -110,10 +110,13 @@ CI runs on every branch, but GitHub cannot block Vercel's git-integration deploy
 The hosted Supabase project keeps automatic daily backups per the Supabase plan (Dashboard → Database → Backups). For an off-platform copy:
 
 ```bash
-pg_dump "$SUPABASE_DB_URL" --schema=public --exclude-table='auth.*' -Fc -f backup-$(date +%F).dump
+pg_dump "$SUPABASE_DB_URL" --schema=public -Fc -f backup-$(date +%F).dump
+# or, data-only with the CLI (line_worker_tokens is bootstrap-managed and
+# must be excluded so a restore never conflicts with the fresh-install row):
+supabase db dump --data-only -x public.line_worker_tokens -f backup-$(date +%F).sql
 ```
 
-**Recovery drill (run monthly):** restore the dump into a scratch local stack (`supabase db reset && pg_restore --clean --if-exists -d "$LOCAL_DB_URL" backup.dump`), then verify row counts match the source (`select 'transactions', count(*) from transactions union all select 'budgets', count(*) from budgets;`). Document the drill date next to the backup file. The migration-based `supabase db reset` plus re-imported data is the full-recovery path; the integration suite doubles as the post-restore verification harness.
+**Recovery drill (run monthly):** restore the dump into a scratch local stack (`supabase db reset && docker exec -i supabase_db_<project> psql -U supabase_admin -d postgres < backup.sql`), then verify row counts match the source (`select 'transactions', count(*) from transactions union all select 'budgets', count(*) from budgets;`). Document the drill date next to the backup file. The migration-based `supabase db reset` plus re-imported data is the full-recovery path; the integration suite doubles as the post-restore verification harness. Last drill: 2026-09-06 (dump → reset → restore → marker row verified).
 
 ### Credential rotation
 

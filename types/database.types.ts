@@ -176,8 +176,8 @@ export type Database = {
         Insert: {
           id: string
           line_user_id: string
-          reply_token: string
-          text: string
+          reply_token?: string | null
+          text?: string | null
           status?: string
           attempts?: number
           next_retry_at?: string
@@ -661,6 +661,14 @@ export type Database = {
           p_amount: number
           p_type: string
           p_day_of_month: number
+        }
+        Returns: Json
+      }
+      import_transactions: {
+        Args: {
+          p_import_id: string
+          p_user_id: string
+          p_rows: Json
         }
         Returns: Json
       }

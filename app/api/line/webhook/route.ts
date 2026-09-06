@@ -40,7 +40,8 @@ export async function POST(request: NextRequest) {
     .map((event, index) => ({
       eventKey: buildEventKey(event, index),
       lineUserId: event.source.userId ?? "",
-      replyToken: event.replyToken,
+      // Reply tokens are single-use and unused for push delivery — never
+      // persisted.
       text: event.message.text ?? "",
       // Ordering data: the queue never lets a later message from the same
       // user run ahead of this one.
