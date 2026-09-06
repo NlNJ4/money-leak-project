@@ -48,7 +48,9 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned: 'latest' resolves via the GitHub releases API, which is
+          # rate-limited on shared runner IPs and intermittently fails.
+          version: 2.116.0
 
       # Applies every migration to a fresh local Postgres — invalid or
       # out-of-order SQL fails this step, which is exactly the gate we want.
