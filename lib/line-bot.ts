@@ -1,6 +1,7 @@
 import "server-only";
 import { parseTransactionWithStatus } from "@/lib/ai/pipeline";
 import type { ParsedTransaction } from "@/lib/ai/provider";
+import { checkBudgetAlerts } from "@/lib/budget-alerts";
 import { recordMetrics } from "@/lib/observability";
 import { monthRange, todayISO } from "@/lib/date";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -467,6 +468,14 @@ async function saveTransaction(
   const head = `✅ บันทึกแล้ว\n\n${category?.icon ?? "📦"} ${category?.name_th ?? parsed.description}\n${fmt(parsed.amount)} บาท`;
   if (parsed.type !== "expense") {
     return head;
+  }
+
+  // Budget warnings are best-effort and never change the save reply; a
+  // failure here must not fail the job (the transaction is committed).
+  try {
+    await checkBudgetAlerts(userId);
+  } catch (err) {
+    console.error("[line-bot] budget alert check failed:", (err as Error).message);
   }
 
   const today = todayISO();

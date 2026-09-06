@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { checkBudgetAlerts } from "@/lib/budget-alerts";
 import { pushOwnerAlertOnce, queueHealth } from "@/lib/observability";
 
 // Daily watchdog (Vercel Cron — see vercel.json). It exists to catch what
@@ -55,6 +57,20 @@ export async function GET(request: NextRequest) {
   }).catch(() => null);
   if (!worker || worker.status !== 401) {
     findings.push("worker endpoint ไม่ได้ปฏิเสธ request ที่ไม่มี token");
+  }
+
+  // 3. Daily budget sweep: users who set budgets but stopped sending
+  //    expenses still get their 80%/100% warnings.
+  try {
+    const admin = createAdminClient();
+    const { data: budgetUsers } = await admin
+      .from("budgets")
+      .select("user_id");
+    for (const row of budgetUsers ?? []) {
+      await checkBudgetAlerts(row.user_id);
+    }
+  } catch (err) {
+    console.error("[health-check] budget sweep failed:", (err as Error).message);
   }
 
   for (const message of findings) {

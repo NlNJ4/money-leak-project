@@ -415,6 +415,45 @@ export type Database = {
           },
         ]
       }
+      budget_alerts: {
+        Row: {
+          user_id: string
+          category_id: string
+          month: string
+          level: string
+          sent_at: string
+        }
+        Insert: {
+          user_id: string
+          category_id: string
+          month: string
+          level: string
+          sent_at?: string
+        }
+        Update: {
+          user_id?: string
+          category_id?: string
+          month?: string
+          level?: string
+          sent_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "budget_alerts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "budget_alerts_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
