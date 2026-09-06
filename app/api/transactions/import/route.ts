@@ -6,6 +6,7 @@ import {
 } from "@/lib/csv-import";
 import { listCategories, ServiceError } from "@/lib/transactions";
 import { getAuthContext } from "@/lib/supabase/server";
+import { enforceMutationRateLimit } from "@/lib/rate-limit";
 
 // CSV import: POST with mode=preview (validate only) or mode=commit
 // (insert the valid rows). The body is raw CSV text in the same format
@@ -16,6 +17,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await getAuthContext();
     if (!auth) throw new ServiceError("unauthorized");
+    enforceMutationRateLimit(auth.userId);
 
     const csv = await request.text();
     const mode = request.nextUrl.searchParams.get("mode") === "commit"
@@ -53,14 +55,14 @@ export async function POST(request: NextRequest) {
         })
         .filter((v): v is NonNullable<typeof v> => v !== null);
 
-      for (let i = 0; i < values.length; i += 500) {
-        const chunk = values.slice(i, i + 500);
-        const { error } = await auth.supabase
-          .from("transactions")
-          .insert(chunk);
-        if (error) throw new ServiceError("insert_failed", error.message);
-        inserted += chunk.length;
-      }
+      // ONE insert statement = one database transaction: a failure leaves
+      // nothing saved, so a client retry can never duplicate rows. The
+      // 1,000-row import cap keeps this single statement small enough.
+      const { error } = await auth.supabase
+        .from("transactions")
+        .insert(values);
+      if (error) throw new ServiceError("insert_failed", error.message);
+      inserted = values.length;
     }
 
     return NextResponse.json({

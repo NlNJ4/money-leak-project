@@ -3,6 +3,7 @@ import { z } from "zod";
 import { CATEGORY_SLUGS } from "@/lib/categories";
 import { getAuthContext } from "@/lib/supabase/server";
 import { ServiceError } from "@/lib/transactions";
+import { enforceMutationRateLimit } from "@/lib/rate-limit";
 
 export const recurringCreateSchema = z.object({
   category: z.enum(CATEGORY_SLUGS),
@@ -27,6 +28,7 @@ export type RecurringRule = {
 async function requireAuth() {
   const auth = await getAuthContext();
   if (!auth) throw new ServiceError("unauthorized");
+  enforceMutationRateLimit(auth.userId);
   return auth;
 }
 

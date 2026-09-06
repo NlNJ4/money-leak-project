@@ -30,6 +30,19 @@ export function startMock(name: string, defaultBehavior: MockBehavior = { status
       } catch {
         /* keep raw */
       }
+
+      // Mirror the real API contract: /message/reply rejects
+      // X-Line-Retry-Key with 400 (unsupported endpoint).
+      const retryKeyHeader = req.headers["x-line-retry-key"];
+      if (req.url === "/message/reply" && retryKeyHeader) {
+        res.statusCode = 400;
+        res.setHeader("content-type", "application/json");
+        res.end(
+          JSON.stringify({ message: "Retry key is not allowed for reply" }),
+        );
+        return;
+      }
+
       requests.push({
         method: req.method ?? "POST",
         path: req.url ?? "/",

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { EXPENSE_CATEGORY_SLUGS, INCOME_CATEGORY_SLUGS } from "@/lib/categories";
 import { getAuthContext } from "@/lib/supabase/server";
 import { ServiceError } from "@/lib/transactions";
+import { enforceMutationRateLimit } from "@/lib/rate-limit";
 
 // Custom categories: user-created, must not collide with the system
 // catalog or the user's own rows (DB unique indexes are the final gate).
@@ -25,6 +26,7 @@ export type CustomCategoryInput = z.infer<typeof customCategorySchema>;
 async function requireAuth() {
   const auth = await getAuthContext();
   if (!auth) throw new ServiceError("unauthorized");
+  enforceMutationRateLimit(auth.userId);
   return auth;
 }
 

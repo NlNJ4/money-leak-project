@@ -7,7 +7,7 @@ A bilingual (Thai/English) personal finance tracker: a Next.js web dashboard plu
 - **Next.js 16** (App Router, Turbopack) + React 19 + Tailwind CSS v4
 - **Supabase** — Postgres with row-level security, Google OAuth, service-role RPCs
 - **LINE Messaging API** — signature-verified webhook, durable job queue
-- **Gemini API** — fallback parser behind a local rule-based parser
+- **Gemini API** — fallback parser behind a local rule-based parser (free-tier guarded: a daily limit counts parse *operations*; one operation may fan out to several provider calls through the model fallback chain)
 - **Vercel** — git-linked production deploys; **Supabase pg_cron** — every-minute worker sweep
 - **Vitest** — 83 unit tests; **GitHub Actions** — lint / typecheck / test / build on every push
 

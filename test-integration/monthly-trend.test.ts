@@ -1,12 +1,7 @@
 import "./app-env";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { serviceClient, userClient } from "./env";
-import {
-  categoryId,
-  createTestUser,
-  insertTransaction,
-  wipeLocalData,
-} from "./helpers";
+import { createTestUser, insertTransaction, wipeLocalData } from "./helpers";
 
 // Monthly trend: trailing-N-month series with zero-filled months.
 

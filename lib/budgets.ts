@@ -4,6 +4,7 @@ import { EXPENSE_CATEGORY_SLUGS } from "@/lib/categories";
 import { monthRange } from "@/lib/date";
 import { getAuthContext } from "@/lib/supabase/server";
 import { ServiceError } from "@/lib/transactions";
+import { enforceMutationRateLimit } from "@/lib/rate-limit";
 
 export const budgetSchema = z.object({
   category: z.enum(EXPENSE_CATEGORY_SLUGS),
@@ -33,6 +34,7 @@ function monthStart(month: string): string {
 async function requireAuth() {
   const auth = await getAuthContext();
   if (!auth) throw new ServiceError("unauthorized");
+  enforceMutationRateLimit(auth.userId);
   return auth;
 }
 

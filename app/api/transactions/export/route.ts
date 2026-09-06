@@ -10,11 +10,12 @@ import { historyFilterSchema } from "@/lib/validation";
 
 // CSV export, STREAMED: rows are fetched cursor-page by cursor-page and
 // encoded incrementally, so a 50k-row export never buffers the whole
-// payload in memory. Hosted Supabase caps a single request at 1,000 rows,
-// which is exactly why paging exists here.
+// payload in memory. Pages stay BELOW Supabase's 1,000-row response cap so
+// listHistory's look-ahead row survives and cursors keep flowing — a
+// 1,000-row page silently drops the look-ahead and truncates at 1,000.
 
 const MAX_EXPORT_ROWS = 50_000;
-const PAGE_SIZE = 1_000;
+const PAGE_SIZE = 999;
 
 function csvCell(value: string | number | null | undefined): string {
   const text = String(value ?? "");

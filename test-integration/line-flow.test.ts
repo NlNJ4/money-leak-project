@@ -108,7 +108,9 @@ describe("normal flow", () => {
 
     const reply = line.requests.find((r) => r.path === "/message/reply");
     expect(reply).toBeTruthy();
-    expect(reply?.headers["x-line-retry-key"]).toMatch(/^[0-9a-f-]{36}$/);
+    // The reply endpoint REJECTS X-Line-Retry-Key (unsupported there), so
+    // first attempts must be sent keyless.
+    expect(reply?.headers["x-line-retry-key"]).toBeUndefined();
     expect(JSON.stringify(reply?.body)).toContain("บันทึกแล้ว");
 
     expect(gemini.requests.length).toBe(0);
@@ -210,10 +212,18 @@ describe("delivery failure paths", () => {
     expect(done?.status).toBe("completed");
   });
 
-  it("treats 409 with a retry key as delivered", async () => {
-    line.queue({ status: 409, body: { message: "The request has already been processed" } });
+  it("treats 409 on a keyed push as delivered", async () => {
+    // First attempt: the reply endpoint times out (no retry key there).
+    line.queue({ hang: true });
     const evt = event("วันนี้");
     await enqueueLineJobs([evt]);
+    await processDueLineJobs();
+    const failed = await jobRow(evt.eventKey);
+    expect(failed?.status).toBe("retry");
+
+    // Retry goes out as a keyed push; 409 = LINE already accepted it.
+    await forceDue(evt.eventKey);
+    line.queue({ status: 409, body: { message: "already processed" } });
     await processDueLineJobs();
 
     const done = await jobRow(evt.eventKey);

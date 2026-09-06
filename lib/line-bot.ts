@@ -141,6 +141,7 @@ type Range = { from: string; to: string };
 
 type SummaryCategory = {
   type: string;
+  category_id: string;
   icon: string;
   name: string;
   total: number;
@@ -295,10 +296,11 @@ async function setBudget(
     throw new Error(`budget upsert failed: ${error.message}`);
   }
 
-  // Immediate feedback: month-to-date spend vs the new budget.
+  // Immediate feedback: month-to-date spend vs the new budget, matched by
+  // category id (display names can collide).
   const summary = await rangeSummary(admin, userId, range);
   const spent = summary.categories
-    .filter((c) => c.type === "expense" && c.name === category.name_th)
+    .filter((c) => c.type === "expense" && c.category_id === category.id)
     .reduce((sum, c) => sum + Number(c.total), 0);
   const pct = amount > 0 ? Math.round((spent / amount) * 100) : 0;
 
@@ -316,6 +318,7 @@ async function addRecurring(
   text: string,
   amount: number,
   dayOfMonth: number,
+  commandKey: string,
 ): Promise<string> {
   const admin = createAdminClient();
 
@@ -331,33 +334,43 @@ async function addRecurring(
   const fallback: string = type === "income" ? "other_income" : "other";
   const slug = guess.parsed?.category ?? fallback;
 
-  const { data: category } = await admin
-    .from("categories")
-    .select("id, type, icon, name_th")
-    .eq("slug", slug)
-    .single();
-
-  if (!category || category.type !== type) {
-    return "ไม่รู้จักหมวดของรายการนี้ครับ ลองระบุหมวดให้ชัดขึ้น เช่น ค่าเน็ต 300 ทุกเดือน";
-  }
-
-  const { error } = await admin.from("recurring_rules").insert({
-    user_id: userId,
-    category_id: category.id,
-    description: text,
-    amount,
-    type,
-    day_of_month: dayOfMonth,
+  // Idempotent under the command's event key: a retried job replays the
+  // stored result instead of creating a duplicate rule (which would
+  // duplicate every monthly transaction thereafter).
+  const { data, error } = await admin.rpc("create_recurring_rule", {
+    p_event_key: commandKey,
+    p_user_id: userId,
+    p_category_slug: slug,
+    p_description: text,
+    p_amount: amount,
+    p_type: type,
+    p_day_of_month: dayOfMonth,
   });
 
   if (error) {
-    throw new Error(`recurring insert failed: ${error.message}`);
+    throw new Error(`create_recurring_rule failed: ${error.message}`);
+  }
+
+  const result = data as {
+    status: string;
+    icon?: string;
+    name?: string;
+  };
+
+  if (result.status === "invalid_input") {
+    return "จำนวนเงินหรือวันที่ไม่ถูกต้องครับ ลองแบบนี้: ค่า Netflix 419 ทุกเดือน";
+  }
+  if (result.status === "invalid_category") {
+    return "ไม่รู้จักหมวดของรายการนี้ครับ ลองระบุหมวดให้ชัดขึ้น เช่น ค่าเน็ต 300 ทุกเดือน";
+  }
+  if (result.status !== "created") {
+    return "บันทึกรายการประจำเดือนไม่สำเร็จครับ";
   }
 
   return [
     `🔁 บันทึกรายการประจำเดือนแล้ว`,
     "",
-    `${category.icon ?? "📦"} ${category.name_th}${text ? ` · ${text}` : ""}`,
+    `${result.icon ?? "📦"} ${result.name ?? ""}${text ? ` · ${text}` : ""}`,
     `${fmt(amount)} บาท ทุกวันที่ ${dayOfMonth} ของเดือน`,
     "",
     "รายการจะถูกบันทึกให้อัตโนมัติในแต่ละเดือนครับ",
@@ -627,6 +640,7 @@ export async function handleLineMessage(
       recurringMatch[1].trim(),
       Number(recurringMatch[2].replace(/,/g, "")),
       recurringMatch[3] ? Number(recurringMatch[3]) : 1,
+      commandKey,
     );
   }
   if (trimmed === "ช่วย" || trimmed.toLowerCase() === "help") {
@@ -699,30 +713,65 @@ async function askPendingConfirm(
 
 async function resolvePendingConfirm(
   userId: string,
-  _commandKey: string,
+  commandKey: string,
   accepted: boolean,
 ): Promise<string> {
   const admin = createAdminClient();
-  const { data, error } = await admin.rpc("take_pending_confirm", {
+
+  if (!accepted) {
+    // Skipping is safe to retry: the pending row merely expires.
+    const { data, error } = await admin.rpc("take_pending_confirm", {
+      p_user_id: userId,
+    });
+    if (error) {
+      throw new Error(`take_pending_confirm failed: ${error.message}`);
+    }
+    void recordMetrics(["confirm_no"]);
+    return data ? "ข้ามรายการนี้แล้วครับ" : "ไม่มีรายการที่รอยืนยันครับ";
+  }
+
+  void recordMetrics(["confirm_yes"]);
+  if (!commandKey) {
+    // Manual/test invocation cannot bind a replay key.
+    return "ระบบไม่พบรหัสข้อความสำหรับยืนยันครับ ลองส่งรายการใหม่อีกครั้งนะครับ";
+  }
+
+  // Atomic consume + save + replay under the confirm command's event key:
+  // a failure rolls the whole command back, so retrying ใช่ is safe and
+  // can never consume one pending item while saving nothing.
+  const { data, error } = await admin.rpc("confirm_pending_line_transaction", {
+    p_event_key: commandKey,
     p_user_id: userId,
   });
 
   if (error) {
-    throw new Error(`take_pending_confirm failed: ${error.message}`);
+    throw new Error(`confirm_pending_line_transaction failed: ${error.message}`);
   }
-  if (!data) {
+
+  const result = data as {
+    status: string;
+    amount?: number | string;
+    description?: string;
+    icon?: string;
+    name?: string;
+  };
+
+  if (result.status === "nothing_pending") {
     return "ไม่มีรายการที่รอยืนยันครับ";
   }
-
-  if (!accepted) {
-    void recordMetrics(["confirm_no"]);
-    return "ข้ามรายการนี้แล้วครับ";
+  if (result.status === "duplicate") {
+    return "รายการนี้บันทึกไปแล้วครับ ✅";
+  }
+  if (result.status === "invalid_category") {
+    return "หมวดหมู่ไม่ถูกต้องครับ ลองบันทึกใหม่อีกครั้งนะครับ";
+  }
+  if (result.status !== "saved") {
+    return "บันทึกไม่สำเร็จครับ ลองใหม่อีกครั้งนะครับ";
   }
 
-  void recordMetrics(["confirm_yes"]);
-  const { event_key: eventKey, payload } = data as {
-    event_key: string;
-    payload: ParsedTransaction;
-  };
-  return saveTransaction(userId, payload, eventKey);
+  const head = `✅ บันทึกแล้ว\n\n${result.icon ?? "📦"} ${result.name ?? ""}${result.description ? ` · ${result.description}` : ""}\n${fmt(Number(result.amount ?? 0))} บาท`;
+
+  const today = todayISO();
+  const summary = await rangeSummary(admin, userId, { from: today, to: today });
+  return `${head}\n\nวันนี้ใช้ไปแล้ว ${fmt(summary.expense)} บาท`;
 }

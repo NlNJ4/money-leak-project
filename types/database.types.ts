@@ -436,6 +436,7 @@ export type Database = {
           month: string
           level: string
           sent_at: string
+          status: string
         }
         Insert: {
           user_id: string
@@ -443,6 +444,7 @@ export type Database = {
           month: string
           level: string
           sent_at?: string
+          status?: string
         }
         Update: {
           user_id?: string
@@ -450,6 +452,7 @@ export type Database = {
           month?: string
           level?: string
           sent_at?: string
+          status?: string
         }
         Relationships: [
           {
@@ -639,6 +642,25 @@ export type Database = {
       monthly_trend: {
         Args: {
           p_months: number
+        }
+        Returns: Json
+      }
+      confirm_pending_line_transaction: {
+        Args: {
+          p_event_key: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      create_recurring_rule: {
+        Args: {
+          p_event_key: string
+          p_user_id: string
+          p_category_slug: string
+          p_description: string
+          p_amount: number
+          p_type: string
+          p_day_of_month: number
         }
         Returns: Json
       }

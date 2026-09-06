@@ -2,16 +2,16 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Refreshes the Supabase auth session cookie on every matched request.
-// Returns the response so callers can chain redirects onto it. Extra
-// request headers (e.g. the CSP nonce set by proxy.ts) flow through to the
-// server render.
+// Returns the response so callers can chain redirects onto it. `requestHeaders`
+// (e.g. the CSP nonce set by proxy.ts) is FORWARDED to the server render via
+// the request modifier — it must never land on the response headers.
 export async function updateSession(
   request: NextRequest,
-  requestHeaders?: Headers,
+  requestHeaders: Headers,
 ) {
-  let supabaseResponse = requestHeaders
-      ? NextResponse.next({ headers: requestHeaders })
-      : NextResponse.next({ request });
+  let supabaseResponse = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,9 +25,9 @@ export async function updateSession(
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
-          supabaseResponse = requestHeaders
-            ? NextResponse.next({ headers: requestHeaders })
-            : NextResponse.next({ request });
+          supabaseResponse = NextResponse.next({
+            request: { headers: requestHeaders },
+          });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
           );
