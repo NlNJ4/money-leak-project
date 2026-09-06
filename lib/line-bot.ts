@@ -27,6 +27,10 @@ const EDIT_LATEST_RE = /^แก้(?:ล่าสุด|รายการล่
 const SET_BUDGET_RE =
   /^(?:เดือนนี้\s*)?ตั้งงบ\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?$/;
 
+// "ค่า Netflix 419 ทุกเดือน" — a monthly recurring transaction.
+const RECURRING_RE =
+  /^(.+?)\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?\s*(?:ทุกเดือน|ทุก\s*เดือน)(?:ทุกวันที่\s*(\d{1,2}))?$/;
+
 // Brute-force guard for code redemption: 5 attempts per LINE user per hour,
 // counted atomically in the database (register_redeem_attempt RPC) so it
 // holds across serverless instances.
@@ -61,6 +65,7 @@ const HELP_TEXT = [
   "แล้วพิมพ์ กู้คืน ภายใน 2 นาที เพื่อเอากลับ",
   "แก้จำนวนเงิน: แก้ล่าสุด 80",
   "ตั้งงบรายจ่าย: ตั้งงบ อาหาร 6000",
+  "รายการประจำเดือน: ค่า Netflix 419 ทุกเดือน",
 ].join("\n");
 
 const NOT_LINKED_TEXT = [
@@ -301,6 +306,61 @@ async function setBudget(
     `🎯 ตั้งงบ "${category.icon ?? ""} ${category.name_th}" เดือนนี้ = ${fmt(amount)} บาท`,
     "",
     `ใช้ไปแล้ว ${fmt(spent)} บาท (${pct}% ของงบ)`,
+  ].join("\n");
+}
+
+// ---- recurring rules (ค่า Netflix 419 ทุกเดือน) ----
+
+async function addRecurring(
+  userId: string,
+  text: string,
+  amount: number,
+  dayOfMonth: number,
+): Promise<string> {
+  const admin = createAdminClient();
+
+  if (!(amount > 0) || amount > 999_999_999 || dayOfMonth < 1 || dayOfMonth > 28) {
+    return "จำนวนเงินหรือวันที่ไม่ถูกต้องครับ ลองแบบนี้: ค่า Netflix 419 ทุกเดือน";
+  }
+
+  // Parse locally first (mirrors the rule parser); escalate nothing —
+  // recurring rules need a known category, other/other_income is allowed.
+  const { parseWithConfidence } = await import("@/lib/ai/rule-parser");
+  const guess = parseWithConfidence(`${text} ${amount}`);
+  const type = guess.parsed?.type ?? "expense";
+  const fallback: string = type === "income" ? "other_income" : "other";
+  const slug = guess.parsed?.category ?? fallback;
+
+  const { data: category } = await admin
+    .from("categories")
+    .select("id, type, icon, name_th")
+    .eq("slug", slug)
+    .single();
+
+  if (!category || category.type !== type) {
+    return "ไม่รู้จักหมวดของรายการนี้ครับ ลองระบุหมวดให้ชัดขึ้น เช่น ค่าเน็ต 300 ทุกเดือน";
+  }
+
+  const { error } = await admin.from("recurring_rules").insert({
+    user_id: userId,
+    category_id: category.id,
+    description: text,
+    amount,
+    type,
+    day_of_month: dayOfMonth,
+  });
+
+  if (error) {
+    throw new Error(`recurring insert failed: ${error.message}`);
+  }
+
+  return [
+    `🔁 บันทึกรายการประจำเดือนแล้ว`,
+    "",
+    `${category.icon ?? "📦"} ${category.name_th}${text ? ` · ${text}` : ""}`,
+    `${fmt(amount)} บาท ทุกวันที่ ${dayOfMonth} ของเดือน`,
+    "",
+    "รายการจะถูกบันทึกให้อัตโนมัติในแต่ละเดือนครับ",
   ].join("\n");
 }
 
@@ -547,6 +607,15 @@ export async function handleLineMessage(
   const budgetMatch = collapsed.match(SET_BUDGET_RE);
   if (budgetMatch) {
     return setBudget(userId, budgetMatch[1].trim(), Number(budgetMatch[2].replace(/,/g, "")));
+  }
+  const recurringMatch = collapsed.match(RECURRING_RE);
+  if (recurringMatch) {
+    return addRecurring(
+      userId,
+      recurringMatch[1].trim(),
+      Number(recurringMatch[2].replace(/,/g, "")),
+      recurringMatch[3] ? Number(recurringMatch[3]) : 1,
+    );
   }
   if (trimmed === "ช่วย" || trimmed.toLowerCase() === "help") {
     return HELP_TEXT;

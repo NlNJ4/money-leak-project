@@ -73,6 +73,19 @@ export async function GET(request: NextRequest) {
     console.error("[health-check] budget sweep failed:", (err as Error).message);
   }
 
+  // 4. Monthly recurring materialization (idempotent per rule+month).
+  try {
+    const admin = createAdminClient();
+    const { data: created } = await admin.rpc("materialize_recurring", {
+      p_month: new Date().toISOString().slice(0, 10),
+    });
+    if (Number(created ?? 0) > 0) {
+      console.log(`[health-check] materialized ${created} recurring transactions`);
+    }
+  } catch (err) {
+    console.error("[health-check] recurring sweep failed:", (err as Error).message);
+  }
+
   for (const message of findings) {
     await pushOwnerAlertOnce("watchdog", message);
   }

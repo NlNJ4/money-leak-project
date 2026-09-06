@@ -454,6 +454,63 @@ export type Database = {
           },
         ]
       }
+      recurring_rules: {
+        Row: {
+          id: string
+          user_id: string
+          category_id: string
+          description: string
+          amount: number
+          type: string
+          day_of_month: number
+          active: boolean
+          last_materialized_month: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          category_id: string
+          description?: string
+          amount: number
+          type: string
+          day_of_month: number
+          active?: boolean
+          last_materialized_month?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          category_id?: string
+          description?: string
+          amount?: number
+          type?: string
+          day_of_month?: number
+          active?: boolean
+          last_materialized_month?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recurring_rules_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recurring_rules_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -558,6 +615,12 @@ export type Database = {
           p_month: string
         }
         Returns: Json
+      }
+      materialize_recurring: {
+        Args: {
+          p_month: string
+        }
+        Returns: number
       }
       save_line_transaction: {
         Args: {
