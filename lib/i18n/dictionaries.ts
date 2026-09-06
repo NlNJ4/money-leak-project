@@ -54,6 +54,7 @@ const th = {
     addTransaction: "เพิ่มรายการ",
     charts: {
       daily: "รายวัน",
+      trend: "แนวโน้ม 6 เดือน",
       noData: "ยังไม่มีข้อมูลในช่วงนี้",
     },
     budgets: {
@@ -152,6 +153,7 @@ const en: Dictionary = {
     addTransaction: "Add transaction",
     charts: {
       daily: "Daily",
+      trend: "6-month trend",
       noData: "No data for this period",
     },
     budgets: {

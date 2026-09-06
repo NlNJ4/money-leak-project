@@ -3,7 +3,11 @@ import { getBudgetProgress } from "@/lib/budgets";
 import { isValidISODate, monthRange, todayRange, weekRange } from "@/lib/date";
 import { getLineConnected } from "@/lib/line-account";
 import { getAuthContext } from "@/lib/supabase/server";
-import { getDashboardData, listCategories } from "@/lib/transactions";
+import {
+  getDashboardData,
+  getMonthlyTrend,
+  listCategories,
+} from "@/lib/transactions";
 
 const PERIODS = ["today", "week", "month", "custom"] as const;
 type Period = (typeof PERIODS)[number];
@@ -39,12 +43,13 @@ export default async function DashboardPage({
 
   // Start the static catalog immediately. getDashboardData() shares the same
   // request-memoized auth promise with the page and dashboard layout.
-  const [auth, data, categories, lineConnected, budgets] = await Promise.all([
+  const [auth, data, categories, lineConnected, budgets, trend] = await Promise.all([
     getAuthContext(),
     getDashboardData(range),
     listCategories(),
     getLineConnected(),
     getBudgetProgress(),
+    getMonthlyTrend(),
   ]);
 
   return (
@@ -56,6 +61,7 @@ export default async function DashboardPage({
       displayName={auth?.displayName ?? ""}
       lineConnected={lineConnected}
       budgets={budgets}
+      trend={trend}
     />
   );
 }

@@ -226,6 +226,26 @@ export async function listCategories(): Promise<Category[]> {
   return (data ?? []) as Category[];
 }
 
+// Six-month income/expense trend (zero-filled months), for the dashboard.
+export type TrendPoint = {
+  month: string;
+  income: number;
+  expense: number;
+  net: number;
+};
+
+export async function getMonthlyTrend(months = 6): Promise<TrendPoint[]> {
+  const { supabase } = await requireClient();
+  const { data, error } = await supabase.rpc("monthly_trend", {
+    p_months: months,
+  });
+  if (error) {
+    throw new ServiceError("query_failed", error.message);
+  }
+  // Scalar json: the array arrives as-is.
+  return (data ?? []) as unknown as TrendPoint[];
+}
+
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
 
 // Resolve a slug against the caller's effective set: their custom rows

@@ -18,8 +18,10 @@ import {
 import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { DailyChart } from "@/components/dashboard/daily-chart";
 import { BudgetCard } from "@/components/dashboard/budget-card";
+import { TrendChart } from "@/components/dashboard/trend-chart";
 import { ConnectLine } from "@/components/dashboard/connect-line";
 import type { BudgetProgress } from "@/lib/budgets";
+import type { TrendPoint } from "@/lib/transactions";
 
 type Period = "today" | "week" | "month" | "custom";
 
@@ -51,6 +53,7 @@ export function DashboardView({
   displayName,
   lineConnected,
   budgets,
+  trend,
 }: {
   data: DashboardData;
   categories: Category[];
@@ -59,6 +62,7 @@ export function DashboardView({
   displayName: string;
   lineConnected: boolean;
   budgets: BudgetProgress[];
+  trend: TrendPoint[];
 }) {
   const { t, locale } = useI18n();
   const router = useRouter();
@@ -280,6 +284,8 @@ export function DashboardView({
         <CategoryDonut items={data.byCategory} total={data.totals.expense} />
 
         <DailyChart data={data.dailyTotals} />
+
+        {trend.length > 0 && <TrendChart data={trend} />}
 
         {actionError && (
           <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">

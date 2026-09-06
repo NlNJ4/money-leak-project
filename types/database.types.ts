@@ -636,6 +636,12 @@ export type Database = {
         }
         Returns: number
       }
+      monthly_trend: {
+        Args: {
+          p_months: number
+        }
+        Returns: Json
+      }
       save_line_transaction: {
         Args: {
           p_event_key: string
