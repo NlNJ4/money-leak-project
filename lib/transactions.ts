@@ -42,6 +42,7 @@ export type CategoryTotal = {
 
 export type DashboardData = {
   totals: { income: number; expense: number; net: number };
+  previous: { income: number; expense: number; net: number };
   byCategory: CategoryTotal[];
   dailyTotals: { date: string; expense: number }[];
   recent: TransactionRow[];
@@ -302,12 +303,14 @@ export async function getDashboardData(
   const value = Array.isArray(summary) ? summary[0] : summary;
   const parsed = value as unknown as {
     totals: { income: number; expense: number; net: number };
+    previous: { income: number; expense: number; net: number };
     byCategory: CategoryTotal[];
     dailyTotals: { date: string; expense: number }[];
   } | null;
 
   return {
     totals: parsed?.totals ?? { income: 0, expense: 0, net: 0 },
+    previous: parsed?.previous ?? { income: 0, expense: 0, net: 0 },
     byCategory: parsed?.byCategory ?? [],
     dailyTotals: parsed?.dailyTotals ?? [],
     recent,

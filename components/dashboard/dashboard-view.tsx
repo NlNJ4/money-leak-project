@@ -98,10 +98,21 @@ export function DashboardView({
   };
 
   const cards = [
-    { label: t.dashboard.income, value: data.totals.income, tone: "text-emerald-600" },
-    { label: t.dashboard.expense, value: data.totals.expense, tone: "text-rose-600" },
-    { label: t.dashboard.net, value: data.totals.net, tone: data.totals.net >= 0 ? "text-zinc-900" : "text-rose-600" },
+    { label: t.dashboard.income, value: data.totals.income, tone: "text-emerald-600", prev: data.previous.income },
+    { label: t.dashboard.expense, value: data.totals.expense, tone: "text-rose-600", prev: data.previous.expense },
+    { label: t.dashboard.net, value: data.totals.net, tone: data.totals.net >= 0 ? "text-zinc-900" : "text-rose-600", prev: data.previous.net },
   ];
+
+  // Comparison chip: percent change vs the previous period. Hidden when
+  // there is no meaningful baseline.
+  const comparison = (current: number, prev: number) => {
+    if (prev === 0 || current === 0) return null;
+    const pct = Math.round(((current - prev) / Math.abs(prev)) * 100);
+    if (pct === 0) return null;
+    const dir = pct > 0 ? "▲" : "▼";
+    const tone = pct > 0 ? "text-rose-500" : "text-emerald-600";
+    return <span className={`text-[10px] font-medium tabular-nums ${tone}`}>{dir} {Math.abs(pct)}%</span>;
+  };
 
   return (
     <div className="min-h-screen w-full bg-zinc-50 font-sans">
@@ -219,7 +230,10 @@ export function DashboardView({
               key={card.label}
               className="rounded-xl border border-zinc-200 bg-white p-4"
             >
-              <p className="text-xs text-zinc-500">{card.label}</p>
+              <p className="flex items-center justify-between text-xs text-zinc-500">
+                {card.label}
+                {comparison(card.value, card.prev)}
+              </p>
               <p className={`mt-1 font-semibold tabular-nums ${card.tone}`}>
                 {formatCurrency(card.value, locale)}
               </p>
