@@ -22,6 +22,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm exec tsc --noEmit
+      - name: Dependency audit (high+)
+        run: pnpm audit --audit-level high
+        continue-on-error: true # alerts block via dependabot PRs, not every CI run
       - run: pnpm test
       - run: pnpm build
         env:

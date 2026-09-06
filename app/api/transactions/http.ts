@@ -10,6 +10,12 @@ export function handleServiceError(err: unknown) {
     if (err.code === "not_found") {
       return NextResponse.json({ error: err.code }, { status: 404 });
     }
+    if (err.code === "rate_limited") {
+      return NextResponse.json(
+        { error: err.code },
+        { status: 429, headers: { "Retry-After": "60" } },
+      );
+    }
     const status =
       err.code.startsWith("category") ||
       err.code === "insert_failed" ||

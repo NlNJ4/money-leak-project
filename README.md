@@ -99,6 +99,36 @@ $$);
 - **Database:** forward-only corrective migrations (see above).
 - **Queue:** dead jobs can be retried with `update line_jobs set status = 'retry', next_retry_at = now() where id = '…';`.
 
+## Security & operations
+
+### Deploy gating
+
+CI runs on every branch, but GitHub cannot block Vercel's git-integration deploys by itself. To make merges the only path to production, enable branch protection on `main` (Settings → Branches → Add rule): **Require a pull request before merging** + **Require status checks** → `verify` and `integration`. Vercel then only ever deploys merges that passed CI.
+
+### Backup & recovery
+
+The hosted Supabase project keeps automatic daily backups per the Supabase plan (Dashboard → Database → Backups). For an off-platform copy:
+
+```bash
+pg_dump "$SUPABASE_DB_URL" --schema=public --exclude-table='auth.*' -Fc -f backup-$(date +%F).dump
+```
+
+**Recovery drill (run monthly):** restore the dump into a scratch local stack (`supabase db reset && pg_restore --clean --if-exists -d "$LOCAL_DB_URL" backup.dump`), then verify row counts match the source (`select 'transactions', count(*) from transactions union all select 'budgets', count(*) from budgets;`). Document the drill date next to the backup file. The migration-based `supabase db reset` plus re-imported data is the full-recovery path; the integration suite doubles as the post-restore verification harness.
+
+### Credential rotation
+
+- **Worker token** (`line_worker_tokens`): rotate with zero downtime — insert a new token, deploy anything that reads it (pg_cron reads the table dynamically), then delete the old one. `insert into line_worker_tokens (token) values (encode(gen_random_bytes(24),'hex'));` … `delete from line_worker_tokens where token = '<old>';`
+- **LINE channel secret/token**, **Gemini key**, **Supabase keys**: rotate in the provider console, update `.env.local` + Vercel env vars, redeploy. `NEXT_PUBLIC_*` changes require a rebuild.
+- **CRON_SECRET**: update the Vercel env var and redeploy; Vercel sends it automatically.
+
+### Rate limiting & CSP
+
+Authenticated mutation routes are rate-limited (30/min per user, in-memory sliding window — per instance; sufficient for flood/loop protection on a single-region deployment). `proxy.ts` sets a nonce-based `Content-Security-Policy` (`strict-dynamic`, no `unsafe-inline` scripts), HSTS, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, and `Permissions-Policy` on every response.
+
+### Monitoring
+
+The daily watchdog (`vercel.json` cron → `/api/line/health-check`, `CRON_SECRET`-gated) covers post-deploy smoke (public page 200, worker endpoint 401 without token), heartbeat staleness, budget-alert sweeps, and recurring materialization. Alerts push to the owner's LINE. `GET /api/line/health` (worker token) returns queue depth, oldest pending job age, heartbeat freshness, and a week of counters.
+
 ## Project structure
 
 ```

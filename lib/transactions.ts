@@ -1,5 +1,6 @@
 import "server-only";
 import { isValidISODate, todayISO } from "@/lib/date";
+import { enforceMutationRateLimit } from "@/lib/rate-limit";
 import { createClient, getAuthContext } from "@/lib/supabase/server";
 import type {
   CreateTransactionInput,
@@ -54,6 +55,15 @@ async function requireClient() {
     throw new ServiceError("unauthorized");
   }
   return auth;
+}
+
+// Authenticated mutation routes call this through the service functions
+// below (create/update/delete) so one limiter covers them all.
+function requireClientWithLimit() {
+  return requireClient().then((auth) => {
+    enforceMutationRateLimit(auth.userId);
+    return auth;
+  });
 }
 
 const transactionSelect = `
@@ -338,7 +348,7 @@ export async function getDashboardData(
 }
 
 export async function createTransaction(input: CreateTransactionInput) {
-  const { supabase, userId } = await requireClient();
+  const { supabase, userId } = await requireClientWithLimit();
 
   const category = await resolveCategory(supabase, userId, input.category);
 
@@ -374,7 +384,7 @@ export async function updateTransaction(
   id: string,
   input: UpdateTransactionInput,
 ): Promise<TransactionRow> {
-  const { supabase, userId } = await requireClient();
+  const { supabase, userId } = await requireClientWithLimit();
 
   // Fetch the current row first: RLS scopes it to the caller, and merging
   // lets us validate type/category consistency against the final state.
@@ -439,7 +449,7 @@ export async function updateTransaction(
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
-  const { supabase } = await requireClient();
+  const { supabase } = await requireClientWithLimit();
 
   const { data, error } = await supabase
     .from("transactions")
