@@ -102,6 +102,64 @@ export function logJobEvent(event: {
   console.log(`[job] ${JSON.stringify(event)}`);
 }
 
+// AI free-tier status: last 7 days of daily request counts plus the
+// current circuit-breaker state, for the ops surface.
+export async function getAiStatus(): Promise<{
+  usage: { day: string; requests: number }[];
+  circuitOpenUntil: string | null;
+  circuitOpen: boolean;
+}> {
+  const admin = createAdminClient();
+  const from = new Date(Date.now() - 7 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+
+  const [{ data: usage }, { data: circuit }] = await Promise.all([
+    admin
+      .from("ai_usage")
+      .select("day, requests")
+      .gte("day", from)
+      .order("day", { ascending: false }),
+    admin.from("ai_circuit").select("open_until").eq("id", 1).maybeSingle(),
+  ]);
+
+  const openUntil = circuit?.open_until ?? null;
+  return {
+    usage: (usage ?? []).map((row) => ({
+      day: String(row.day),
+      requests: Number(row.requests),
+    })),
+    circuitOpenUntil: openUntil,
+    circuitOpen: openUntil !== null && new Date(openUntil).getTime() > Date.now(),
+  };
+}
+
+export type DeadJob = {
+  id: string;
+  attempts: number;
+  lastError: string | null;
+  receivedAt: string;
+};
+
+// Most recent dead-lettered jobs, for the ops surface. Message text is
+// deliberately excluded — ids, attempts, and errors only.
+export async function listDeadJobs(limit = 50): Promise<DeadJob[]> {
+  const { data, error } = await createAdminClient()
+    .from("line_jobs")
+    .select("id, attempts, last_error, received_at")
+    .eq("status", "dead")
+    .order("received_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`dead list failed: ${error.message}`);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    attempts: row.attempts,
+    lastError: row.last_error,
+    receivedAt: String(row.received_at),
+  }));
+}
+
 // Alert the (single) owner through their linked LINE account. Deduped per
 // alert key per day so a persistent condition pushes once, not every sweep.
 export async function pushOwnerAlertOnce(

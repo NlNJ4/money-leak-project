@@ -390,3 +390,31 @@ export async function isValidWorkerToken(token: string): Promise<boolean> {
     .maybeSingle();
   return Boolean(data);
 }
+
+// Safe dead-job recovery: resets every dead job to retry with a fresh
+// attempt cycle. Safe by construction — processing re-runs are deduped by
+// the save markers / command-result ledger, and delivery-only retries
+// replay the stored reply text. Returns the ids re-queued.
+export async function retryDeadJobs(): Promise<string[]> {
+  const admin = createAdminClient();
+  const { data: ids, error } = await admin
+    .from("line_jobs")
+    .update({
+      status: "retry",
+      attempts: 0,
+      next_retry_at: new Date().toISOString(),
+      last_error: null,
+    })
+    .eq("status", "dead")
+    .select("id");
+
+  if (error) {
+    throw new Error(`retry-dead failed: ${error.message}`);
+  }
+
+  const retried = (ids ?? []).map((row) => row.id);
+  for (const id of retried) {
+    logJobEvent({ jobId: id, attempt: 0, phase: "claimed" });
+  }
+  return retried;
+}

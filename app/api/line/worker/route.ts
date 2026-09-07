@@ -4,8 +4,8 @@ import {
   cleanupOldJobs,
   isValidWorkerToken,
   processDueLineJobs,
+  retryDeadJobs,
 } from "@/lib/line-jobs";
-import { logJobEvent } from "@/lib/observability";
 
 // Scheduled retry sweep, hit every minute by Supabase pg_cron (Vercel
 // Hobby cron is daily-only). This is what makes retries run even when no
@@ -66,39 +66,20 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ dead: dead ?? [], depth: counts });
 }
 
-// Retry dead jobs: safe by construction. Processing re-runs are deduped by
-// the save markers / command-result ledger, and delivery-only retries
-// replay the stored reply text. Attempts reset so the job gets a fresh
-// retry cycle instead of instantly dead-lettering again.
+// Retry dead jobs via the shared lib function.
 export async function PUT(request: NextRequest) {
   const token = request.headers.get("x-worker-token");
   if (!token || !(await isValidWorkerToken(token))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const admin = createAdminClient();
-  const { data: ids, error } = await admin
-    .from("line_jobs")
-    .update({
-      status: "retry",
-      attempts: 0,
-      next_retry_at: new Date().toISOString(),
-      last_error: null,
-    })
-    .eq("status", "dead")
-    .select("id");
-
-  if (error) {
-    console.error("[line worker] retry-dead failed:", error.message);
+  try {
+    const retried = await retryDeadJobs();
+    return NextResponse.json({ ok: true, retried: retried.length, ids: retried });
+  } catch (err) {
+    console.error("[line worker] retry-dead failed:", (err as Error).message);
     return NextResponse.json({ error: "retry_failed" }, { status: 500 });
   }
-
-  const retried = (ids ?? []).map((row) => row.id);
-  for (const id of retried) {
-    logJobEvent({ jobId: id, attempt: 0, phase: "claimed" });
-  }
-
-  return NextResponse.json({ ok: true, retried: retried.length, ids: retried });
 }
 
 async function countDeadJobs(): Promise<number> {
