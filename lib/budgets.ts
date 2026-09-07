@@ -89,9 +89,16 @@ export async function getBudgetProgress(
   month = monthRange().from,
 ): Promise<BudgetProgress[]> {
   const { supabase } = await requireAuth();
+  const startedAt = Date.now();
   const { data, error } = await supabase.rpc("budget_progress", {
     p_month: monthStart(month.slice(0, 7)),
   });
+  console.log(
+    `[perf] ${JSON.stringify({
+      op: "budget_progress",
+      durationMs: Date.now() - startedAt,
+    })}`,
+  );
   if (error) throw new ServiceError("query_failed", error.message);
   return (data ?? []) as unknown as BudgetProgress[];
 }

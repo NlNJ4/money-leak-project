@@ -47,13 +47,6 @@ export function HistoryView({
   const [cursor, setCursor] = useState<HistoryCursor | null>(nextCursor);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [serverState, setServerState] = useState({ rows, nextCursor });
-  if (serverState.rows !== rows || serverState.nextCursor !== nextCursor) {
-    setServerState({ rows, nextCursor });
-    setAllRows(rows);
-    setCursor(nextCursor);
-  }
-
   const [from, setFrom] = useState(filters.from);
   const [to, setTo] = useState(filters.to);
   const [type, setType] = useState(filters.type ?? "");
@@ -62,6 +55,25 @@ export function HistoryView({
   const [q, setQ] = useState(filters.q ?? "");
   const [exporting, setExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+
+  const [serverState, setServerState] = useState({ rows, nextCursor, filters });
+  if (
+    serverState.rows !== rows ||
+    serverState.nextCursor !== nextCursor ||
+    serverState.filters !== filters
+  ) {
+    // Server data and filter inputs move together on back-navigation so
+    // inputs never go stale vs the URL.
+    setServerState({ rows, nextCursor, filters });
+    setAllRows(rows);
+    setCursor(nextCursor);
+    setFrom(filters.from);
+    setTo(filters.to);
+    setType(filters.type ?? "");
+    setCategory(filters.category ?? "");
+    setSource(filters.source ?? "");
+    setQ(filters.q ?? "");
+  }
 
   // CSV import flow: pick file → server-side preview → explicit commit.
   // The import ID is generated once per pending file and reused across

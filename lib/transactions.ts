@@ -292,9 +292,16 @@ export type TrendPoint = {
 
 export async function getMonthlyTrend(months = 6): Promise<TrendPoint[]> {
   const { supabase } = await requireClient();
+  const startedAt = Date.now();
   const { data, error } = await supabase.rpc("monthly_trend", {
     p_months: months,
   });
+  console.log(
+    `[perf] ${JSON.stringify({
+      op: "monthly_trend",
+      durationMs: Date.now() - startedAt,
+    })}`,
+  );
   if (error) {
     throw new ServiceError("query_failed", error.message);
   }
@@ -356,10 +363,13 @@ export async function listTransactions(
 
 // Totals + breakdown come from a PostgreSQL aggregate (dashboard_summary)
 // so results are exact at any volume; the recent list is a small paged query.
+// Each RPC logs one structured timing line (no ids beyond duration) so slow
+// paths show up in Vercel logs before users notice.
 export async function getDashboardData(
   range: TransactionFilterRange,
 ): Promise<DashboardData> {
   const { supabase, userId } = await requireClient();
+  const startedAt = Date.now();
 
   const [summaryResult, recent] = await Promise.all([
     supabase.rpc("dashboard_summary", {
@@ -368,6 +378,15 @@ export async function getDashboardData(
     }),
     queryTransactions(supabase, userId, range, 10),
   ]);
+
+  console.log(
+    `[perf] ${JSON.stringify({
+      op: "dashboard_summary",
+      from: range.from,
+      to: range.to,
+      durationMs: Date.now() - startedAt,
+    })}`,
+  );
 
   const { data: summary, error: summaryError } = summaryResult;
 

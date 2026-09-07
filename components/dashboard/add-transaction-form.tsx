@@ -1,10 +1,30 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n/provider";
 import { todayISO } from "@/lib/date";
 import type { Category } from "@/lib/transactions";
+
+const DRAFT_KEY = "tx-form-draft";
+
+type Draft = {
+  type: "expense" | "income";
+  amount: string;
+  category: string;
+  description: string;
+  date: string;
+};
+
+function loadDraft(): Draft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as Draft) : null;
+  } catch {
+    return null;
+  }
+}
 
 // Pre-filled values when the form edits an existing transaction; omit for
 // the plain create flow.
@@ -30,17 +50,33 @@ export function AddTransactionForm({
 }) {
   const { t, locale } = useI18n();
   const router = useRouter();
+  // A mid-entry draft survives unmounting (page switch, form toggle):
+  // saved to sessionStorage on change, restored on remount, cleared on
+  // successful save. Edit mode is intentionally not drafted.
+  const draft = initial ? null : loadDraft();
   const [type, setType] = useState<"expense" | "income">(
-    initial?.type ?? "expense",
+    initial?.type ?? draft?.type ?? "expense",
   );
   const [amount, setAmount] = useState(
-    initial ? String(initial.amount) : "",
+    initial ? String(initial.amount) : (draft?.amount ?? ""),
   );
-  const [category, setCategory] = useState(initial?.category ?? "");
-  const [description, setDescription] = useState(initial?.description ?? "");
-  const [date, setDate] = useState(initial?.date ?? todayISO());
+  const [category, setCategory] = useState(initial?.category ?? draft?.category ?? "");
+  const [description, setDescription] = useState(initial?.description ?? draft?.description ?? "");
+  const [date, setDate] = useState(initial?.date ?? draft?.date ?? todayISO());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initial) return;
+    try {
+      window.sessionStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({ type, amount, category, description, date } satisfies Draft),
+      );
+    } catch {
+      /* storage full/blocked: drafting is best-effort */
+    }
+  }, [type, amount, category, description, date, initial]);
 
   // Inline custom-category creation.
   const [addingCategory, setAddingCategory] = useState(false);
@@ -90,6 +126,7 @@ export function AddTransactionForm({
       if (!initial) {
         setAmount("");
         setDescription("");
+        window.sessionStorage.removeItem(DRAFT_KEY);
       }
       onSaved?.({
         id: initial?.id ?? "",
