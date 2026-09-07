@@ -107,7 +107,7 @@ describe("export → restore round-trip", () => {
     // ---- Replay into user B using the same validated paths ----
     // Custom category first (transactions and budgets reference it).
     const exportedCategory = exportA.custom_categories[0];
-    const { data: restoredCat, error: restoredCatErr } = await clientB
+    const { error: restoredCatErr } = await clientB
       .from("categories")
       .insert({
         user_id: userB.userId,
