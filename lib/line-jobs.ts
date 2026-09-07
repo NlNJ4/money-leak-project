@@ -208,7 +208,10 @@ async function runJob(job: LineJobRow): Promise<void> {
       durationMs: Date.now() - startedAt,
       via,
     });
-    await recordMetrics([`delivery_fail_${via}`]);
+    // LINE 429 = rate/allowance limiting — tracked separately from generic
+    // failures so quota exhaustion is visible on the ops surface.
+    const is429 = err instanceof Error && /\b429\b/.test(err.message);
+    await recordMetrics([is429 ? "delivery_fail_429" : `delivery_fail_${via}`]);
     await markRetry(job, "delivery", err);
     return;
   }
@@ -265,9 +268,11 @@ async function markRetry(
     logJobEvent({ jobId: job.id, attempt: job.attempts, phase: "dead" });
     await recordMetrics(["jobs_dead"]);
 
-    // A processing failure means the user never heard anything back — send
-    // one best-effort apology so they are not left silent. Delivery
-    // failures already produced their reply content elsewhere.
+    // Two distinct dead-letter notices:
+    // - processing failure: nothing was saved, so the user SHOULD resend.
+    // - delivery failure: the transaction (if any) IS already saved — the
+    //   message must say so and point at the dashboard, never encourage
+    //   resubmission.
     if (phase === "processing") {
       try {
         await pushToUser(
@@ -277,6 +282,16 @@ async function markRetry(
         );
       } catch (pushErr) {
         console.error("[line-jobs] dead-letter notice push failed:", job.id, pushErr);
+      }
+    } else {
+      try {
+        await pushToUser(
+          job.line_user_id,
+          "ข้อความของคุณถูกประมวลผลแล้วครับ — ถ้าเป็นรายรับรายจ่าย ระบบบันทึกให้เรียบร้อยแล้ว ตรวจสอบได้ที่หน้าเว็บครับ",
+          lineRetryKey(`${job.id}:delivery-dead-notice`),
+        );
+      } catch (pushErr) {
+        console.error("[line-jobs] delivery-dead notice push failed:", job.id, pushErr);
       }
     }
     return;
