@@ -74,13 +74,22 @@ export async function GET(request: NextRequest) {
   }
 
   // 4. Monthly recurring materialization (idempotent per rule+month).
+  //    The previous month is materialized too, so a rule whose month was
+  //    missed while the worker was down backfills late instead of losing
+  //    the transaction forever.
   try {
     const admin = createAdminClient();
-    const { data: created } = await admin.rpc("materialize_recurring", {
-      p_month: new Date().toISOString().slice(0, 10),
-    });
-    if (Number(created ?? 0) > 0) {
-      console.log(`[health-check] materialized ${created} recurring transactions`);
+    const now = new Date();
+    const prevMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    for (const month of [prevMonth.toISOString().slice(0, 10), now.toISOString().slice(0, 10)]) {
+      const { data: created, error } = await admin.rpc("materialize_recurring", {
+        p_month: month,
+      });
+      if (error) {
+        console.error(`[health-check] materialize (${month}) failed:`, error.message);
+      } else if (Number(created ?? 0) > 0) {
+        console.log(`[health-check] materialized ${created} recurring transactions for ${month}`);
+      }
     }
   } catch (err) {
     console.error("[health-check] recurring sweep failed:", (err as Error).message);
