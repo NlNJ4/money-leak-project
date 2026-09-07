@@ -33,7 +33,14 @@ export async function createClient() {
 // are verified locally against cached public keys. React cache keeps the result
 // request-scoped, so the dashboard layout, page, and data layer share one auth
 // verification instead of making repeated Auth server calls.
-export const getAuthContext = cache(async () => {
+export type AuthContext = {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  displayName: string;
+  email: string;
+};
+
+export const getAuthContext = cache(async (): Promise<AuthContext | null> => {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getClaims();
   const claims = data?.claims;

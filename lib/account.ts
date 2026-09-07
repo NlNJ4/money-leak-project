@@ -1,10 +1,10 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ServiceError } from "@/lib/transactions";
-import { getAuthContext } from "@/lib/supabase/server";
+import { getAuthContext, type AuthContext } from "@/lib/supabase/server";
 import { enforceMutationRateLimit } from "@/lib/rate-limit";
 import {
-  listHistory,
+  listHistoryFor,
   type HistoryCursor,
   type HistoryRow,
 } from "@/lib/transactions";
@@ -20,11 +20,14 @@ import {
 const EXPORT_PAGE_SIZE = 999;
 const EXPORT_MAX_ROWS = 50_000;
 
-async function collectAllTransactions(): Promise<HistoryRow[]> {
+async function collectAllTransactions(
+  auth: AuthContext,
+): Promise<HistoryRow[]> {
   const rows: HistoryRow[] = [];
   let cursor: HistoryCursor | undefined;
   do {
-    const page = await listHistory(
+    const page = await listHistoryFor(
+      auth,
       { range: { from: "1970-01-01", to: "2999-12-31" } },
       cursor,
       EXPORT_PAGE_SIZE,
@@ -35,14 +38,16 @@ async function collectAllTransactions(): Promise<HistoryRow[]> {
   return rows;
 }
 
-export async function exportMyData(): Promise<Record<string, unknown>> {
-  const auth = await getAuthContext();
-  if (!auth) throw new ServiceError("unauthorized");
-
+// Collects the export payload for an account. `auth` must already be scoped
+// to the account (the cookie context in production; a user-scoped client in
+// the restore round-trip test).
+export async function collectExportData(
+  auth: AuthContext,
+): Promise<Record<string, unknown>> {
   const supabase = auth.supabase;
   const [transactions, budgets, recurring, customCategories, identities] =
     await Promise.all([
-      collectAllTransactions(),
+      collectAllTransactions(auth),
       supabase
         .from("budgets")
         .select(
@@ -73,6 +78,8 @@ export async function exportMyData(): Promise<Record<string, unknown>> {
     account: { user_id: auth.userId, display_name: auth.displayName },
     // Category references are embedded per row (slug + display names), so
     // the export is self-describing without the categories table.
+    // Provenance-only fields (source, created_at) document history but are
+    // not reconstructable through the public API paths.
     transactions: transactions.map((row) => ({
       date: row.transaction_date,
       type: row.type,
@@ -88,6 +95,12 @@ export async function exportMyData(): Promise<Record<string, unknown>> {
     custom_categories: customCategories.data ?? [],
     linked_identities: identities.data ?? [],
   };
+}
+
+export async function exportMyData(): Promise<Record<string, unknown>> {
+  const auth = await getAuthContext();
+  if (!auth) throw new ServiceError("unauthorized");
+  return collectExportData(auth);
 }
 
 // Returns the identity rows removed (for the caller's best-effort LINE

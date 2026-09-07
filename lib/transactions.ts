@@ -160,7 +160,24 @@ export async function listHistory(
   cursor?: HistoryCursor,
   limit = 20,
 ): Promise<HistoryPageData> {
-  const { data, error } = await queryHistory(filters, cursor, limit);
+  const auth = await requireClient();
+  return listHistoryFor(auth, filters, cursor, limit);
+}
+
+// Explicit-client variant: same query, caller-supplied RLS scope (used by
+// the account-export collector and the integration round-trip test).
+export async function listHistoryFor(
+  auth: { supabase: ServerClient; userId: string },
+  filters: HistoryFilters,
+  cursor?: HistoryCursor,
+  limit = 20,
+): Promise<HistoryPageData> {
+  const { data, error } = await queryHistory(
+    filters,
+    cursor,
+    limit,
+    auth,
+  );
   if (error) throw new ServiceError("query_failed", error.message);
 
   const rows = (data ?? []) as unknown as HistoryRow[];
@@ -189,8 +206,17 @@ async function queryHistory(
   filters: HistoryFilters,
   cursor?: HistoryCursor,
   limit?: number,
+  forClient?: { supabase: ServerClient; userId: string },
 ) {
-  const { supabase, userId } = await requireClient();
+  let supabase: ServerClient;
+  let userId: string;
+  if (forClient) {
+    ({ supabase, userId } = forClient);
+  } else {
+    const auth = await requireClient();
+    supabase = auth.supabase;
+    userId = auth.userId;
+  }
 
   let query = supabase
     .from("transactions")
